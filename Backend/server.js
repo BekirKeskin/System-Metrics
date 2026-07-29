@@ -193,8 +193,7 @@ function calculateNetworkMetrics(dynamicMetrics, interfaceSpeedMbps){
 }
 
 function getUnitedDynamicMetrics(counterInstanceName, callback){
-
-    const command = `$disk = (Get-Counter '\\FizikselDisk(_Total)\\Disk Okuma Bayt/sn','\\FizikselDisk(_Total)\\Disk Yazma Bayt/sn').CounterSamples; $network = Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Where-Object { $_.Name -eq '${counterInstanceName}' } | Select-Object -First 1; [PSCustomObject]@{ readBytesPerSec = $disk[0].CookedValue; writeBytesPerSec = $disk[1].CookedValue; receivedBytesPerSec = $network.BytesReceivedPersec; sentBytesPerSec = $network.BytesSentPersec } | ConvertTo-Json -Compress`;
+    const command = `(Get-Counter '\\FizikselDisk(_Total)\\Disk Okuma Bayt/sn','\\FizikselDisk(_Total)\\Disk Yazma Bayt/sn','\\Ağ Bağdaştırıcısı(${counterInstanceName})\\Alınan Bayt/sn','\\Ağ Bağdaştırıcısı(${counterInstanceName})\\Gönderilen Bayt/sn').CounterSamples | Select-Object -ExpandProperty CookedValue`;
 
     runPowerShellCommand(command, (output) => {
 
@@ -202,15 +201,19 @@ function getUnitedDynamicMetrics(counterInstanceName, callback){
             return;
         }
 
-        console.log("Ham birleşik metrik çıktısı:", output);
-
         try {
-            const dynamicMetrics = JSON.parse(output);
+            const values = output.trim().split(/\r?\n/);
 
-            const readBytesPerSec = Number(dynamicMetrics.readBytesPerSec);
-            const writeBytesPerSec = Number(dynamicMetrics.writeBytesPerSec);
-            const receivedBytesPerSec = Number(dynamicMetrics.receivedBytesPerSec);
-            const sentBytesPerSec = Number(dynamicMetrics.sentBytesPerSec);
+            if (values.length < 4) {
+                console.log("Tüm dinamik metrikler alınamadı:", values);
+                callback(null);
+                return;
+            }
+
+            const readBytesPerSec = Number(values[0].replace(",", "."));
+            const writeBytesPerSec = Number(values[1].replace(",", "."));
+            const receivedBytesPerSec = Number(values[2].replace(",", "."));
+            const sentBytesPerSec = Number(values[3].replace(",", "."));
 
             const readMBPerSec = Number((readBytesPerSec/BYTES_IN_MB).toFixed(2));
             const writeMBPerSec = Number((writeBytesPerSec/BYTES_IN_MB).toFixed(2));
@@ -230,16 +233,12 @@ function getUnitedDynamicMetrics(counterInstanceName, callback){
 }
 
 function startMetricsInterval(networkInfo){
-    console.log(
-        "startMetricsInterval fonksiyonuna gelen instance:",
-        networkInfo?.counterInstanceName
-    );
+
     clearInterval(cpuInterval);
     
     let previousMeasure = getCpuTimes();
         
     cpuInterval = setInterval(()=>{
-        console.log("Metrik ölçümü başladı.");
 
         if(isMetricsRunning || isShuttingDown){
             return;
@@ -250,11 +249,6 @@ function startMetricsInterval(networkInfo){
         const cpuUsage = calculateCpuUsage(previousMeasure, currentMeasure);
         const ramMeasure = getRamMetrics();
         previousMeasure = currentMeasure;
-
-        console.log(
-            "Gönderilen counter instance:",
-            networkInfo?.counterInstanceName
-        );
 
         getUnitedDynamicMetrics(networkInfo.counterInstanceName,
             (dynamicMetrics) => {
