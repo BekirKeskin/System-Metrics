@@ -4,21 +4,86 @@
 const http = require("node:http");
 const { Server } = require("socket.io"); // Socket.IO paketinin dışarı sunduğu değerlerden Server sınıfını alır.
 const os = require("node:os");
-const { exec } = require("node:child_process");
+const { exec, spawn } = require("node:child_process");
 
 
 /*          !!!   DEĞİŞKENLER   !!!         */
 
+const allowedMetricsIntervals = [1000, 5000, 10000];
+const LOGIN_USERNAME = "admin";
+const LOGIN_PASSWORD = "1234";
+const LOGIN_TOKEN = "system-metrics-auth-token";
+
+const BYTES_IN_MB = 1024 ** 2;
+const BYTES_IN_GB = 1024 ** 3;
+const BITS_IN_BYTE = 8;
+const BITS_IN_MEGABIT = 1_000_000;
+
+const POWERSHELL_COMMAND_END = "__COMMAND_END__";
+
 const cpuList = os.cpus();
 const cpuCount = cpuList.length;
-let cpuInterval;
-let systemInfo;
-let isShuttingDown = false;
-let isMetricsRunning = false;
 
+let metricsIntervalMs = 2000;
+let cpuInterval;
+
+let powerShellProcess;
+let powerShellOutput = "";
+let pendingPowerShellCallback = null;
+
+let systemInfo;
+let activeNetworkInfo;
+
+let isMetricsRunning = false;
+let isShuttingDown = false;
 
 
 /*          !!!   FONKSİYONLAR   !!!         */
+
+function startPowerShellProcess() {
+    powerShellProcess = spawn("powershell.exe",["-NoLogo","-NoProfile",
+        "-NonInteractive","-Command","-"]);
+
+    powerShellProcess.on("spawn",()=>{ //spawn hazır event
+        console.log("PowerShell süreci başlatıldı.");
+
+        powerShellProcess.stdin.write(
+            '[Console]::InputEncoding = [System.Text.Encoding]::UTF8; ' +
+            '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ' +
+            '$OutputEncoding = [System.Text.Encoding]::UTF8\n'
+        );
+    });
+
+    powerShellProcess.stdout.on("data",(data)=>{
+        powerShellOutput += data.toString();
+
+        if(powerShellOutput.includes(POWERSHELL_COMMAND_END)) {
+
+            const completedOutput = powerShellOutput
+            .replace(POWERSHELL_COMMAND_END, "")
+            .trim();
+
+            powerShellOutput = "";
+
+            if(pendingPowerShellCallback) {
+                pendingPowerShellCallback(completedOutput);
+                pendingPowerShellCallback = null;
+            }
+        }
+    });
+
+    powerShellProcess.stderr.on("data", (data)=>{
+        console.error("PowerShell Hatası:", data.toString());
+    });
+}
+startPowerShellProcess();
+
+function runPowerShellCommand(command, callback) {
+    pendingPowerShellCallback = callback;
+
+    powerShellProcess.stdin.write(`${command}; Write-Output "${POWERSHELL_COMMAND_END}"\n`);
+}
+
 
 function getCpuTimes() {
     const cpus = os.cpus();
@@ -37,6 +102,28 @@ function getCpuTimes() {
     };
 }
 
+function calculateCpuUsage(previousMeasure, currentMeasure){
+    const totalDiff = currentMeasure.total - previousMeasure.total;
+    const idleDiff = currentMeasure.idle - previousMeasure.idle;
+    const activeDiff = totalDiff - idleDiff;
+
+    return totalDiff > 0 ? (activeDiff / totalDiff) * 100 : 0;
+}
+
+function getRamMetrics(){
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const memUsage = usedMem / totalMem * 100;
+    
+    return{
+        totalMemGB: Number((totalMem/BYTES_IN_GB).toFixed(2)),
+        freeMemGB: Number((freeMem/BYTES_IN_GB).toFixed(2)),
+        usedMemGB: Number((usedMem/BYTES_IN_GB).toFixed(2)),
+        usagePercentage: Number(memUsage.toFixed(2))
+    };
+}
+
 function getPhysicalCoreCount(callback) {
     exec(
         "powershell -NoProfile -Command \"(Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum\"",
@@ -49,22 +136,6 @@ function getPhysicalCoreCount(callback) {
             callback(physicalCoreCount);
         }
     );
-}
-
-function getRamMetrics(){
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-    const memUsage = usedMem / totalMem * 100;
-
-    const bytesInGB = 1024 ** 3;
-    
-    return{
-        totalMemGB: Number((totalMem/bytesInGB).toFixed(2)),
-        freeMemGB: Number((freeMem/bytesInGB).toFixed(2)),
-        usedMemGB: Number((usedMem/bytesInGB).toFixed(2)),
-        usagePercentage: Number(memUsage.toFixed(2))
-    };
 }
 
 function getNetworkInfo(callback){
@@ -93,42 +164,56 @@ function getNetworkInfo(callback){
                 return;
             }
 
-            const activeNetworkInfo = {
+            const parsedNetworkInfo = {
                 interfaceName: networkInfo.Name,
                 interfaceDescription: networkInfo.InterfaceDescription,
                 counterInstanceName,
                 interfaceSpeedMbps
             };
-            callback(activeNetworkInfo);
+            callback(parsedNetworkInfo);
         }
     );
 }
 
+function calculateNetworkMetrics(dynamicMetrics, interfaceSpeedMbps){
+
+    const receivedMbps = Number(((dynamicMetrics.receivedBytesPerSec * BITS_IN_BYTE) / BITS_IN_MEGABIT).toFixed(2));
+    const sentMbps = Number(((dynamicMetrics.sentBytesPerSec * BITS_IN_BYTE) / BITS_IN_MEGABIT).toFixed(2));
+    const totalBytesPerSec = dynamicMetrics.receivedBytesPerSec + dynamicMetrics.sentBytesPerSec;
+
+    const totalBitsPerSec = totalBytesPerSec * BITS_IN_BYTE;
+    const capacityBitsPerSec = interfaceSpeedMbps * BITS_IN_MEGABIT;
+    const networkUsagePercentage = Number(((totalBitsPerSec / capacityBitsPerSec) * 100).toFixed(2));
+
+    return {
+        receivedMbps,
+        sentMbps,
+        networkUsagePercentage
+    };
+}
+
 function getUnitedDynamicMetrics(counterInstanceName, callback){
-    const bytesInMB = 1024 ** 2;
-    exec(
-        `powerShell -NoProfile -Command \"(Get-Counter '\\FizikselDisk(_Total)\\Disk Okuma Bayt/sn','\\FizikselDisk(_Total)\\Disk Yazma Bayt/sn','\\Ağ Bağdaştırıcısı(${counterInstanceName})\\Alınan Bayt/sn','\\Ağ Bağdaştırıcısı(${counterInstanceName})\\Gönderilen Bayt/sn').CounterSamples | Select-Object -ExpandProperty CookedValue\"`,
-        (error,stdout,stderr) => {
-            if(isShuttingDown){
-                return;
-            }
 
-            if(error){
-                console.log("!!! Metrikler alınamadı !!!", error);
-                callback(null);
-                return;
-            }
+    const command = `$disk = (Get-Counter '\\FizikselDisk(_Total)\\Disk Okuma Bayt/sn','\\FizikselDisk(_Total)\\Disk Yazma Bayt/sn').CounterSamples; $network = Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Where-Object { $_.Name -eq '${counterInstanceName}' } | Select-Object -First 1; [PSCustomObject]@{ readBytesPerSec = $disk[0].CookedValue; writeBytesPerSec = $disk[1].CookedValue; receivedBytesPerSec = $network.BytesReceivedPersec; sentBytesPerSec = $network.BytesSentPersec } | ConvertTo-Json -Compress`;
 
-            const values = stdout.trim().split(/\r?\n/);
+    runPowerShellCommand(command, (output) => {
 
-            const readBytesPerSec = Number(values[0].replace(",","."));
-            const writeBytesPerSec = Number(values[1].replace(",", "."));
+        if(isShuttingDown){
+            return;
+        }
 
-            const receivedBytesPerSec = Number(values[2].replace(",", "."));
-            const sentBytesPerSec = Number(values[3].replace(",", "."));
+        console.log("Ham birleşik metrik çıktısı:", output);
 
-            const readMBPerSec = Number((readBytesPerSec/bytesInMB).toFixed(2));
-            const writeMBPerSec = Number((writeBytesPerSec/bytesInMB).toFixed(2));
+        try {
+            const dynamicMetrics = JSON.parse(output);
+
+            const readBytesPerSec = Number(dynamicMetrics.readBytesPerSec);
+            const writeBytesPerSec = Number(dynamicMetrics.writeBytesPerSec);
+            const receivedBytesPerSec = Number(dynamicMetrics.receivedBytesPerSec);
+            const sentBytesPerSec = Number(dynamicMetrics.sentBytesPerSec);
+
+            const readMBPerSec = Number((readBytesPerSec/BYTES_IN_MB).toFixed(2));
+            const writeMBPerSec = Number((writeBytesPerSec/BYTES_IN_MB).toFixed(2));
 
             callback({
                 readMBPerSec,
@@ -136,8 +221,71 @@ function getUnitedDynamicMetrics(counterInstanceName, callback){
                 receivedBytesPerSec,
                 sentBytesPerSec
             });
+        } catch (error) {
+            console.error("Dinamik metrik çıktısı çözülemedi:", output);
+            console.error(error);
+            callback(null);
         }
+    });
+}
+
+function startMetricsInterval(networkInfo){
+    console.log(
+        "startMetricsInterval fonksiyonuna gelen instance:",
+        networkInfo?.counterInstanceName
     );
+    clearInterval(cpuInterval);
+    
+    let previousMeasure = getCpuTimes();
+        
+    cpuInterval = setInterval(()=>{
+        console.log("Metrik ölçümü başladı.");
+
+        if(isMetricsRunning || isShuttingDown){
+            return;
+        }
+        isMetricsRunning = true;
+
+        const currentMeasure = getCpuTimes();
+        const cpuUsage = calculateCpuUsage(previousMeasure, currentMeasure);
+        const ramMeasure = getRamMetrics();
+        previousMeasure = currentMeasure;
+
+        console.log(
+            "Gönderilen counter instance:",
+            networkInfo?.counterInstanceName
+        );
+
+        getUnitedDynamicMetrics(networkInfo.counterInstanceName,
+            (dynamicMetrics) => {
+                if(!dynamicMetrics || isShuttingDown){
+                    isMetricsRunning = false;
+                    return;
+                }
+
+                const networkMetrics = calculateNetworkMetrics(
+                    dynamicMetrics,
+                    networkInfo.interfaceSpeedMbps
+                );
+
+                const systemMetrics = {            
+                    cpuUsagePercentage: Number(cpuUsage.toFixed(2)),
+                    usedMemGB: ramMeasure.usedMemGB,
+                    freeMemGB: ramMeasure.freeMemGB,
+                    memUsagePercentage: ramMeasure.usagePercentage,
+                    readMBPerSec: dynamicMetrics.readMBPerSec,
+                    writeMBPerSec: dynamicMetrics.writeMBPerSec,
+                    receivedMbps: networkMetrics.receivedMbps,
+                    sentMbps: networkMetrics.sentMbps,
+                    networkUsagePercentage: networkMetrics.networkUsagePercentage
+                };
+
+                console.log("CurrentMetrics", systemMetrics);
+                io.emit("systemMetrics", systemMetrics);
+                isMetricsRunning = false;
+            }
+        );
+    },metricsIntervalMs);
 }
 
 
@@ -145,6 +293,56 @@ function getUnitedDynamicMetrics(counterInstanceName, callback){
 
 // (req, res) her gelen istek için çalışan bir callback,   req istemciden gelen   res gönderilen
 const server = http.createServer((req, res)=>{
+    //cors yalnızca socket.io tarafını yönettiği için node:http ile yazılan /login cevabına otomatik uygulanmaz
+    // bu nedenle res.setHeader kontrollerini ekliyoruz. setHeader HTTP response a header eklemek için kullanılır
+    res.setHeader("Access-Control-Allow-Origin", "http://localhost:4200"); // Angular frontende izin
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS"); // Hangi HTTP yöntemlerine izin verildiği
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");  //Frontend'in Content-Type application/json headerını kullanmasına izin verir.
+
+    if(req.method === "OPTIONS"){
+        res.writeHead(204); // NO CONTENT = istek başarılı ama body yok
+        res.end();
+        return;
+    }
+
+    if(req.method === "POST" && req.url === "/login"){ // iki isteğinde doğruluğunu onaylıyoruz
+        
+        console.log("Login isteği geldi.");
+        let body = "";
+
+        req.on("data",(chunk)=>{ //chunk isteğin gelen bir parçası  ilk hali Buffer olabilir
+            body += chunk.toString();
+        });
+        req.on("end",()=>{
+
+            const loginData = JSON.parse(body);
+            const username = loginData.username;
+            const password = loginData.password;
+
+
+            if(username === LOGIN_USERNAME && password === LOGIN_PASSWORD){
+                res.writeHead(200,{
+                    "Content-Type": "application/json; charset=utf-8"
+                });
+
+                res.end(JSON.stringify({
+                    success: true,
+                    message: "Giriş başarılı.",
+                    token: LOGIN_TOKEN
+                }));
+                return;
+            }
+
+            res.writeHead(401,{
+                "Content-Type": "application/json; charset=utf-8"
+            });
+            res.end(JSON.stringify({
+                success: false,
+                message: "Kullanıcı adı veya şifre hatalı."
+            }));
+        });
+        return;
+    }
 
     // writeHead durum kodu ve içerik türü bilgileri ayarlar
     res.writeHead(200,{
@@ -162,10 +360,51 @@ const io = new Server(server, {
     }
 });
 
+/*          !!!   OLAY DİNLEYİCİLERİ   !!!         */
+
+// io.on() socket.io sunucusunda bir olayı dinler, "connection" yeni istemci bağlantısı oluştuğunda tetiklenir.
+// socket yalnızca bağlanan o istemiciyi temsil eder.
+io.on("connection",(socket)=>{
+
+    if(isShuttingDown){
+        socket.disconnect(true);
+        return;
+    }
+
+    console.log("Bağlandı:", socket.id);
+
+    if(systemInfo){
+        socket.emit("systemInfo", systemInfo);
+    }
+
+    socket.on("changeMetricsInterval", (intervalMs)=>{
+
+        console.log("Süre isteği geldi:",intervalMs,"Socket:",socket.id);
+
+        if(!allowedMetricsIntervals.includes(intervalMs)) {
+            console.log("Geçersiz metrik aralığı: ", intervalMs);
+            return;
+        }
+
+        if(!activeNetworkInfo){
+            console.log("Network bilgisi henüz hazır değil.");
+            return;
+        }
+
+        metricsIntervalMs = intervalMs;
+        startMetricsInterval(activeNetworkInfo);
+
+        console.log(`Metrik aralığı ${intervalMs} ms olarak değiştirildi.`);
+    });
+});
+
 /*          !!!   SİSTEM METRİKLERİ   !!!         */
 
 getPhysicalCoreCount((count) => {
     getNetworkInfo((networkInfo)=>{
+        
+        activeNetworkInfo = networkInfo;
+
         systemInfo = {
             physicalCoreCount: count,
             logicalProcessorCount: cpuCount,
@@ -173,75 +412,14 @@ getPhysicalCoreCount((count) => {
             interfaceName: networkInfo.interfaceName,
             interfaceSpeedMbps: networkInfo.interfaceSpeedMbps
         };
+
         console.log("SystemInfo", systemInfo);
         io.emit("systemInfo", systemInfo);
 
-        let previousMeasure = getCpuTimes();
-        
-        cpuInterval = setInterval(()=>{
-
-            if(isMetricsRunning){
-                return;
-            }
-            isMetricsRunning = true;
-
-            const currentMeasure = getCpuTimes();
-            const totalDiff = currentMeasure.total - previousMeasure.total;
-            const idleDiff = currentMeasure.idle - previousMeasure.idle;
-            const activeDiff = totalDiff - idleDiff;
-            const cpuUsage = (activeDiff / totalDiff) * 100;
-
-            const ramMeasure = getRamMetrics();
-
-            previousMeasure = currentMeasure;
-
-            getUnitedDynamicMetrics(networkInfo.counterInstanceName,
-                (dynamicMetrics) => {
-                    if(!dynamicMetrics){
-                        isMetricsRunning = false;
-                        return;
-                    }
-                    const receivedMbps = Number(((dynamicMetrics.receivedBytesPerSec * 8) / 1_000_000).toFixed(2));
-                    const sentMbps = Number(((dynamicMetrics.sentBytesPerSec * 8) / 1_000_000).toFixed(2));
-                    const totalBytesPerSec = dynamicMetrics.receivedBytesPerSec + dynamicMetrics.sentBytesPerSec;
-
-                    const totalBitsPerSec = totalBytesPerSec * 8;
-                    const capacityBitsPerSec = networkInfo.interfaceSpeedMbps * 1_000_000;
-                    const networkUsagePercentage = Number(((totalBitsPerSec / capacityBitsPerSec) * 100).toFixed(2));
-
-                    const systemMetrics = {            
-                        cpuUsagePercentage: Number(cpuUsage.toFixed(2)),
-                        usedMemGB: ramMeasure.usedMemGB,
-                        freeMemGB: ramMeasure.freeMemGB,
-                        memUsagePercentage: ramMeasure.usagePercentage,
-                        readMBPerSec: dynamicMetrics.readMBPerSec,
-                        writeMBPerSec: dynamicMetrics.writeMBPerSec,
-                        receivedMbps,
-                        sentMbps,
-                        networkUsagePercentage
-                    };
-
-                    console.log("CurrentMetrics", systemMetrics);
-                    io.emit("systemMetrics", systemMetrics);
-                    isMetricsRunning = false;
-                }
-            );
-        },2000);
+        startMetricsInterval(networkInfo);
     });
 });
 
-
-/*          !!!   OLAY DİNLEYİCİLERİ   !!!         */
-
-// io.on() socket.io sunucusunda bir olayı dinler, "connection" yeni istemci bağlantısı oluştuğunda tetiklenir.
-// socket yalnızca bağlanan o istemiciyi temsil eder.
-io.on("connection",(socket)=>{
-    console.log("Bağlandı.");
-
-    if(systemInfo){
-        socket.emit("systemInfo", systemInfo);
-    }
-});
 
 server.listen(3000,()=>{
     console.log("Server çalışmaya başladı!");
@@ -250,14 +428,21 @@ server.listen(3000,()=>{
 /*          !!!   KAPATMA İŞLEMİ   !!!         */
 
 process.on("SIGINT",()=>{
+
+    if(isShuttingDown){
+        return;
+    }
+    isShuttingDown = true;
     console.log("\nKapatma işlemi başlatıldı... ");
 
-    isShuttingDown = true;
     clearInterval(cpuInterval);
+
+    if(powerShellProcess){
+        powerShellProcess.stdin.end();
+        powerShellProcess.kill();
+    }
 
     io.close(()=>{
         console.log("Server kapandı!");
     });
 });
-
-

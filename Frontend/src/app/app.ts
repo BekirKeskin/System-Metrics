@@ -1,6 +1,6 @@
-import { Component, signal, inject } from '@angular/core';
+import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { Socket } from './services/socket';
+
 
 @Component({
   selector: 'app-root',
@@ -8,8 +8,4 @@ import { Socket } from './services/socket';
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
-export class App {
-  protected readonly title = signal('Frontend');
-  readonly socketService = inject(Socket);
-
-}
+export class App {}

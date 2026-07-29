@@ -26,4 +26,8 @@ export class Socket {
             console.log('SystemMetrics:', systemMetricsData);
         });
     }
+
+    changeMetricsInterval(intervalMs: number){
+        this.socket.emit("changeMetricsInterval", intervalMs);
+    }
 }

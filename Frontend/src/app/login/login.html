@@ -1,0 +1,12 @@
+<h1> Giriş Yap </h1>
+<form (ngSubmit)="login()">
+    
+    <label for="username"> Kullanıcı Adı: </label>
+    <input id="username" placeholder="Kullanıcı Adı" type="text" [(ngModel)]="username" name="username">
+    
+    <label for="password"> Şifre: </label>
+    <input id="password" placeholder="Şifre" type="password" [(ngModel)]="password" name="password">
+    
+    <button type="submit"> Giriş Yap </button>
+
+</form>
