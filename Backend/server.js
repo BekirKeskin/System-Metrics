@@ -5,13 +5,14 @@ const http = require("node:http");
 const { Server } = require("socket.io"); // Socket.IO paketinin dışarı sunduğu değerlerden Server sınıfını alır.
 const os = require("node:os");
 const { exec, spawn } = require("node:child_process");
+const bcrypt = require("bcrypt");
+const pool = require("./db");
+
 
 
 /*          !!!   DEĞİŞKENLER   !!!         */
 
 const allowedMetricsIntervals = [1000, 5000, 10000];
-const LOGIN_USERNAME = "admin";
-const LOGIN_PASSWORD = "1234";
 const LOGIN_TOKEN = "system-metrics-auth-token";
 
 const BYTES_IN_MB = 1024 ** 2;
@@ -307,15 +308,68 @@ const server = http.createServer((req, res)=>{
         req.on("data",(chunk)=>{ //chunk isteğin gelen bir parçası  ilk hali Buffer olabilir
             body += chunk.toString();
         });
-        req.on("end",()=>{
+        req.on("end", async () => {
+            try {
+                const loginData = JSON.parse(body);
+                const username = loginData.username;
+                const password = loginData.password;
 
-            const loginData = JSON.parse(body);
-            const username = loginData.username;
-            const password = loginData.password;
+                // $1 kullanıcıdan gelen değeri SQL metnine doğrudan yapıştırmamızı engeller
+                const result = await pool.query(
+                    `SELECT id, username, password_hash, role, is_active
+                    FROM users
+                    WHERE username = $1`,
+                    [username] // $1 yerine gönderilen değer
+                );
+                if (result.rows.length === 0) {
 
+                    res.writeHead(401, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
 
-            if(username === LOGIN_USERNAME && password === LOGIN_PASSWORD){
-                res.writeHead(200,{
+                    res.end(JSON.stringify({
+                        success: false,
+                        message: "Kullanıcı adı veya şifre hatalı."
+                    }));
+
+                    return;
+                }
+                const user = result.rows[0];
+
+                if(!user.is_active) {
+                
+                    res.writeHead(401, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: false,
+                        message: "Kullanıcı hesabı pasif."
+                    }));
+
+                    return;
+                }
+
+                const isPasswordCorrect = await bcrypt.compare(
+                    password,
+                    user.password_hash
+                );
+
+                if(!isPasswordCorrect) {
+
+                    res.writeHead(401, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: false,
+                        message: "Kullanıcı adı veya şifre hatalı."
+                    }));
+
+                    return;
+                }
+
+                res.writeHead(200, {
                     "Content-Type": "application/json; charset=utf-8"
                 });
 
@@ -324,20 +378,24 @@ const server = http.createServer((req, res)=>{
                     message: "Giriş başarılı.",
                     token: LOGIN_TOKEN
                 }));
-                return;
-            }
+            } 
+            catch(error) {
+                console.error("Login hatası:", error);
 
-            res.writeHead(401,{
-                "Content-Type": "application/json; charset=utf-8"
-            });
-            res.end(JSON.stringify({
-                success: false,
-                message: "Kullanıcı adı veya şifre hatalı."
-            }));
+                if (!res.headersSent) {
+                    res.writeHead(500, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+                }
+
+                res.end(JSON.stringify({
+                    success: false,
+                    message: "Sunucu hatası oluştu"
+                }));
+            }
         });
         return;
     }
-
     // writeHead durum kodu ve içerik türü bilgileri ayarlar
     res.writeHead(200,{
         "Content-Type":"text/plain; charset=utf-8"
