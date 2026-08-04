@@ -10,6 +10,7 @@ const pool = require("./db");
 const handleAlarmRoutes = require("./routes/alarm-routes");
 const handleUserRoutes = require("./routes/user-routes");
 const handleLoginRoutes = require("./routes/auth-routes");
+const checkAlarms = require("./services/alarm-service");
 
 
 
@@ -258,7 +259,7 @@ function startMetricsInterval(networkInfo){
         previousMeasure = currentMeasure;
 
         getUnitedDynamicMetrics(networkInfo.counterInstanceName,
-            (dynamicMetrics) => {
+            async (dynamicMetrics) => {
                 if(!dynamicMetrics || isShuttingDown){
                     isMetricsRunning = false;
                     return;
@@ -283,7 +284,16 @@ function startMetricsInterval(networkInfo){
 
                 console.log("CurrentMetrics", systemMetrics);
                 io.emit("systemMetrics", systemMetrics);
-                isMetricsRunning = false;
+
+                try {
+                    await checkAlarms(systemMetrics);
+                }
+                catch (error) {
+                    console.error("Alarm kontrol hatası:", error);
+                }
+                finally {
+                    isMetricsRunning = false;
+                }
             }
         );
     },metricsIntervalMs);
