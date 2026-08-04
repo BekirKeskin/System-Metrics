@@ -287,7 +287,7 @@ function startMetricsInterval(networkInfo){
 /*          !!!   SERVER   !!!         */
 
 // (req, res) her gelen istek için çalışan bir callback,   req istemciden gelen   res gönderilen
-const server = http.createServer((req, res)=>{
+const server = http.createServer(async (req, res)=>{
     //cors yalnızca socket.io tarafını yönettiği için node:http ile yazılan /login cevabına otomatik uygulanmaz
     // bu nedenle res.setHeader kontrollerini ekliyoruz. setHeader HTTP response a header eklemek için kullanılır
     res.setHeader("Access-Control-Allow-Origin", "http://localhost:4200"); // Angular frontende izin
@@ -376,7 +376,10 @@ const server = http.createServer((req, res)=>{
                 res.end(JSON.stringify({
                     success: true,
                     message: "Giriş başarılı.",
-                    token: LOGIN_TOKEN
+                    token: LOGIN_TOKEN,
+                    userId: user.id,
+                    username: user.username,
+                    role: user.role
                 }));
             } 
             catch(error) {
@@ -396,6 +399,202 @@ const server = http.createServer((req, res)=>{
         });
         return;
     }
+
+    if(req.method === "POST" && req.url === "/admin/users") {
+        
+        console.log("Kullanıcı ekleme isteği geldi.");
+        let body = "";
+
+        req.on("data",(chunk)=>{ //chunk isteğin gelen bir parçası  ilk hali Buffer olabilir
+            body += chunk.toString();
+        });
+
+        req.on("end", async ()=>{
+            try {
+                const addData = JSON.parse(body);
+                const username = addData.username;
+                const name = addData.name;
+                const surname = addData.surname;
+                const email = addData.email;
+                const password = addData.password;
+
+                if (!username || !name || !surname || !email || !password) {
+
+                    res.writeHead(400,{
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: false,
+                        message: "Tüm alanları giriniz !!!"
+                    }));
+                    return;
+                }
+
+                const passwordHash = await bcrypt.hash(password,10);
+
+                const result = await pool.query(
+                    `INSERT INTO users (
+                        username,
+                        name,
+                        surname,
+                        email,
+                        password_hash,
+                        role
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id, username, name, surname, email, role, is_active, created_at`,
+                    [
+                        username,
+                        name,
+                        surname,
+                        email,
+                        passwordHash,
+                        "user"
+                    ]
+                );
+                console.log(result.rows[0]);
+
+                res.writeHead(201, {
+                    "Content-Type": "application/json; charset=utf-8"
+                });
+
+                res.end(JSON.stringify({
+                    success: true,
+                    message: "Kullanıcı başarıyla oluşturuldu.",
+                    user: result.rows[0]
+                }));
+            }
+            catch (error){
+                console.error("Ekleme hatası:", error);
+
+                if (!res.headersSent) {
+                    res.writeHead(500, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+                }
+
+                res.end(JSON.stringify({
+                    success: false,
+                    message: "Sunucu hatası oluştu"
+                }));
+            }
+        });
+        return;
+    }
+
+    if(req.method === "GET" && req.url === "/admin/users") {
+
+        try {
+
+            const result = await pool.query(
+                `SELECT id, username, name, surname, email, role, is_active FROM users`
+            );
+
+            res.writeHead(200,{
+                "Content-Type": "application/json; charset=utf-8"
+            });
+
+            res.end(JSON.stringify({
+                success: true,
+                message: "Değerler getirildi.",
+                users: result.rows
+            }));
+        }
+        catch (error) {
+            console.error("Değerler getirilemedi !!!", error);
+
+            if (!res.headersSent) {
+                res.writeHead(500, {
+                    "Content-Type": "application/json; charset=utf-8"
+                });
+            }
+
+            res.end(JSON.stringify({
+                success: false,
+                message: "Sunucu hatası oluştu"
+            }));
+        }
+        return;
+    }
+
+    if(req.method === "POST" && req.url === "/admin/alarms") {
+        
+        console.log("Alarm ekleme isteği geldi.");
+        let body = "";
+    
+        req.on("data",(chunk)=>{ //chunk isteğin gelen bir parçası  ilk hali Buffer olabilir
+            body += chunk.toString();
+        });
+
+        req.on("end", async ()=>{
+
+            try {
+                const addAlarm = JSON.parse(body);
+                const recipientUserId = addAlarm.recipientUserId;
+                const metricType = addAlarm.metricType;
+                const threshold = addAlarm.threshold;
+                const severity = addAlarm.severity;
+
+                if (!recipientUserId || !metricType || !threshold || !severity) {
+
+                    res.writeHead(400,{
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+                    
+                    res.end(JSON.stringify({
+                        success: false,
+                        message: "Tüm alanları giriniz !!!"
+                    }));
+                    return;
+                }
+
+                const result = await pool.query(
+                    `INSERT INTO alarms (
+                    recipient_user_id,
+                    metric_type,
+                    threshold,
+                    severity
+                    )
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING id, recipient_user_id, metric_type, threshold, severity, is_active, created_at`,
+                    [
+                        recipientUserId,
+                        metricType,
+                        threshold,
+                        severity
+                    ]
+                );
+                console.log(result.rows[0]);
+
+                res.writeHead(201, {
+                    "Content-Type": "application/json; charset=utf-8"
+                });
+
+                res.end(JSON.stringify({
+                    success: true,
+                    message: "Alarm başarıyla oluşturuldu.",
+                    alarm: result.rows[0]
+                }));
+            }
+            catch (error) {
+                console.error("Alarm Ekleme hatası:", error);
+
+                if (!res.headersSent) {
+                    res.writeHead(500, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+                }
+
+                res.end(JSON.stringify({
+                    success: false,
+                    message: "Sunucu hatası oluştu"
+                }));
+            }
+        });
+        return;
+    }
+
     // writeHead durum kodu ve içerik türü bilgileri ayarlar
     res.writeHead(200,{
         "Content-Type":"text/plain; charset=utf-8"

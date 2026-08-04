@@ -1,6 +1,9 @@
 <main>
-
+  @if(isAdmin){
+    <button type="button" (click)="goToAdmin()">Admin Paneli</button>
+  }
   <button class="exit" (click)="logout()">Çıkış Yap</button>
+
 
   <section class="system-info">
     <h2>Sistem Bilgileri</h2>

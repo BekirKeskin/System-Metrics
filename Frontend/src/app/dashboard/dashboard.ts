@@ -12,6 +12,7 @@ import { Router } from '@angular/router';
 export class Dashboard {
   readonly socketService = inject(Socket);
   private readonly router = inject(Router);
+  isAdmin = localStorage.getItem('userRole') === 'admin';
 
   changeMetricsInterval(event: Event) {
     const selectElement = event.target as HTMLSelectElement;
@@ -22,6 +23,13 @@ export class Dashboard {
 
   logout(){
     localStorage.removeItem('authToken');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('username');
+    localStorage.removeItem('userRole');
     this.router.navigate(['/login']);
+  }
+
+  goToAdmin(){
+    this.router.navigate(["/admin"]);
   }
 }

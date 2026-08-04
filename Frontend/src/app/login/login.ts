@@ -25,11 +25,14 @@ export class Login {
       password: this.password
     };
 
-    this.http.post<{success: boolean; message: string; token: string}>
+    this.http.post<{success: boolean; message: string; token: string; userId: number; username: string; role: string;}>
     ('http://localhost:3000/login', loginData)
     .subscribe({
       next: (response) => {
         localStorage.setItem('authToken', response.token);
+        localStorage.setItem('userId', response.userId.toString());
+        localStorage.setItem('username', response.username);
+        localStorage.setItem('userRole', response.role);
         this.router.navigate(['/dashboard']);
       },
       error: (error) => {
