@@ -27,7 +27,7 @@
         
         <option [ngValue]="null" disabled>Kullanıcı Seçiniz</option>
 
-        @for (user of users; track user.id) {
+        @for (user of users(); track user.id) {
             <option [ngValue]="user.id">{{ user.username }} - {{ user.name }} {{ user.surname }}</option>
         }
 
@@ -61,3 +61,96 @@
     <button type="submit">Alarm Ekle</button>
 
 </form>
+
+<section>
+    <h2>Mevcut Alarmlar</h2>
+
+    @if (alarms().length === 0) {
+        <p>Henüz alarm bulunmuyor.</p>
+    }
+    @else {
+        <table>
+            <thead>
+                <tr>
+                    <th>Kullanıcı</th>
+                    <th>Metrik</th>
+                    <th>Eşik</th>
+                    <th>Seviye</th>
+                    <th>Durum</th>
+                    <th>İşlemler</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                @for (alarm of alarms(); track alarm.id) {
+                    <tr>
+                        @if (editingAlarmId() === alarm.id) {
+                            <td>
+                                <select [(ngModel)]="editRecipientUserId">
+                                    @for (user of users(); track user.id) {
+                                        <option [ngValue]="user.id">
+                                            {{ user.username }} -
+                                            {{ user.name }} {{ user.surname }}
+                                        </option>
+                                    }
+                                </select>
+                            </td>
+
+                            <td>
+                                <select [(ngModel)]="editMetricType">
+                                    <option value="cpu">CPU</option>
+                                    <option value="ram">RAM</option>
+                                    <option value="disk">Disk</option>
+                                    <option value="network">Network</option>
+                                </select>
+                            </td>
+
+                            <td>
+                                <input type="number" [(ngModel)]="editThreshold" min="0" step="0.01">
+                            </td>
+
+                            <td>
+                                <select [(ngModel)]="editSeverity">
+                                    <option value="low">Düşük</option>
+                                    <option value="medium">Orta</option>
+                                    <option value="high">Yüksek</option>
+                                    <option value="critical">Kritik</option>
+                                </select>
+                            </td>
+
+                            <td>
+                                <select [(ngModel)]="editIsActive">
+                                    <option [ngValue]="true">Aktif</option>
+                                    <option [ngValue]="false">Pasif</option>
+                                </select>
+                            </td>
+
+                            <td>
+                                <button type="button" (click)="updateAlarm()">Kaydet</button>
+                                <button type="button" (click)="cancelEditingAlarm()">İptal</button>
+                            </td>
+                        }
+                        @else {
+                            <td>
+                                {{ alarm.username }} - {{ alarm.name }} {{ alarm.surname }}
+                            </td>
+
+                            <td>{{ alarm.metric_type }}</td>
+                            <td>{{ alarm.threshold }}</td>
+                            <td>{{ alarm.severity }}</td>
+
+                            <td>
+                                {{ alarm.is_active ? 'Aktif' : 'Pasif' }}
+                            </td>
+
+                            <td>
+                                <button type="button" (click)="startEditingAlarm(alarm)">Düzenle</button>
+                                <button type="button" (click)="deleteAlarm(alarm.id)">Sil</button>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</section>
