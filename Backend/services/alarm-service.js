@@ -1,4 +1,5 @@
 const pool = require("../db");
+const sendAlarmEmail = require("./mail-service");
 
 const triggeredAlarmIds = new Set();
 
@@ -7,9 +8,11 @@ async function checkAlarms(systemMetrics) {
     try {
 
         const result = await pool.query(
-            `SELECT id, recipient_user_id, metric_type, threshold, severity
+            `SELECT alarms.id, alarms.recipient_user_id, alarms.metric_type, alarms.threshold, alarms.severity, users.email
             FROM alarms
-            WHERE is_active = true`,
+            INNER JOIN users
+                ON alarms.recipient_user_id = users.id
+            WHERE alarms.is_active = true`,
         );
         if (result.rows.length === 0) {
             return;
@@ -37,9 +40,37 @@ async function checkAlarms(systemMetrics) {
             }
         }
 
+        const highestExceededAlarms = new Map();
+
         for (const alarm of exceededAlarms) {
+            const selectedAlarm = highestExceededAlarms.get(alarm.metric_type);
+
+            if (!selectedAlarm || Number(alarm.threshold) > Number(selectedAlarm.threshold)) {
+                highestExceededAlarms.set(alarm.metric_type, alarm);
+            }
+        }
+
+        for (const alarm of highestExceededAlarms.values()) {
             if (!triggeredAlarmIds.has(alarm.id)) {
                 console.log("Alarm tetiklendi:", alarm);
+
+                let currentValue;
+
+                if (alarm.metric_type === "cpu") {
+                    currentValue = systemMetrics.cpuUsagePercentage;
+                }
+                else if (alarm.metric_type === "ram"){
+                    currentValue = systemMetrics.memUsagePercentage;
+                }
+                else {
+                    continue;
+                }
+
+                await sendAlarmEmail(
+                    alarm.email,
+                    "Eşik Aşımı",
+                    `Metrik adı: ${alarm.metric_type} Anlık değer: ${currentValue} Eşik değeri: ${alarm.threshold}`
+                );
                 triggeredAlarmIds.add(alarm.id);
             }
         }
