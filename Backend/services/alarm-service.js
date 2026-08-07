@@ -66,7 +66,7 @@ async function checkAlarms(systemMetrics) {
                     continue;
                 }
 
-                await sendAlarmEmail(
+                sendAlarmEmail(
                     alarm.email,
                     "Eşik Aşımı",
                     `Metrik adı: ${alarm.metric_type} Anlık değer: ${currentValue} Eşik değeri: ${alarm.threshold}`

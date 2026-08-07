@@ -19,7 +19,7 @@ const LOGIN_TOKEN = "system-metrics-auth-token";
 const cpuList = os.cpus();
 const cpuCount = cpuList.length;
 
-let metricsIntervalMs = 2000;
+let metricsIntervalMs = 1000;
 let cpuInterval;
 
 let systemInfo;
