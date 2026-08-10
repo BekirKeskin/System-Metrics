@@ -1,4 +1,29 @@
 <main>
+
+  <div class="server-selection">
+    <label for="serverSelect">
+        Sunucu:
+    </label>
+
+    <select
+      id="serverSelect"
+      [value]="socketService.selectedServerId() ?? ''"
+      (change)="socketService.selectServer($any($event.target).value)"
+    >
+      @for (
+        server of socketService.servers();
+        track server.id
+      ) {
+          <option [value]="server.id">
+            {{ server.name }} - {{ server.os }}
+            - {{ server.isOnline ? 'Online' : 'Offline' }}
+          </option>
+        }
+    </select>
+  </div>
+
+
+
   @if(isAdmin){
     <button type="button" (click)="goToAdmin()">Admin Paneli</button>
   }
@@ -9,7 +34,7 @@
     <h2>Sistem Bilgileri</h2>
 
     <div class="info-grid">
-      @if(socketService.systemInfo(); as systemInfo){
+      @if(socketService.selectedServer(); as systemInfo){
         <p>Çekirdek: {{systemInfo.physicalCoreCount}}</p>
         <p>Thread: {{systemInfo.logicalProcessorCount}}</p>
         <p>Toplam RAM: {{systemInfo.totalMemGB}} GB</p>
@@ -35,7 +60,7 @@
     <h2>Sistem Metrikleri</h2>
 
     <div class="metrics-grid">
-      @if(socketService.systemMetrics(); as systemMetrics){
+      @if(socketService.selectedMetrics(); as systemMetrics){
         <p>CPU: {{systemMetrics.cpuUsagePercentage}}%</p>
         <p>Kullanılan RAM: {{systemMetrics.usedMemGB}} GB</p>
         <p>Boş RAM: {{systemMetrics.freeMemGB}} GB</p>

@@ -3,6 +3,8 @@
 const http = require("node:http");
 const { Server } = require("socket.io");
 const os = require("node:os");
+const { createHash, timingSafeEqual } = require("node:crypto");
+const pool = require("./db");
 const handleAlarmRoutes = require("./routes/alarm-routes");
 const handleUserRoutes = require("./routes/user-routes");
 const handleLoginRoutes = require("./routes/auth-routes");
@@ -14,6 +16,7 @@ const { getCpuTimes, calculateCpuUsage, getRamMetrics, getPhysicalCoreCount, get
 /*          !!!   DEĞİŞKENLER   !!!         */
 
 const allowedMetricsIntervals = [1000, 5000, 10000];
+const LOCAL_SERVER_KEY = `local:${os.hostname()}`;
 const LOGIN_TOKEN = "system-metrics-auth-token";
 
 const cpuList = os.cpus();
@@ -28,10 +31,212 @@ let activeNetworkInfo;
 let isMetricsRunning = false;
 let isShuttingDown = false;
 
+let localServerId = null;
+let serverListInterval = null;
+
 
 /*          !!!   FONKSİYONLAR   !!!         */
 
 startPowerShellProcess();
+
+async function upsertServer(serverData) {
+    const result = await pool.query(
+        `
+        INSERT INTO servers (
+            server_key,
+            name,
+            hostname,
+            os,
+            source_type,
+            physical_core_count,
+            logical_processor_count,
+            total_mem_gb,
+            interface_name,
+            interface_speed_mbps,
+            last_seen
+        )
+        VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9, $10,
+            NOW()
+        )
+        ON CONFLICT (server_key)
+        DO UPDATE SET
+            name =
+                EXCLUDED.name,
+
+            hostname =
+                EXCLUDED.hostname,
+
+            os =
+                EXCLUDED.os,
+
+            source_type =
+                EXCLUDED.source_type,
+
+            physical_core_count =
+                EXCLUDED.physical_core_count,
+
+            logical_processor_count =
+                EXCLUDED.logical_processor_count,
+
+            total_mem_gb =
+                EXCLUDED.total_mem_gb,
+
+            interface_name =
+                EXCLUDED.interface_name,
+
+            interface_speed_mbps =
+                EXCLUDED.interface_speed_mbps,
+
+            last_seen =
+                NOW()
+
+        RETURNING id
+        `,
+        [
+            serverData.serverKey,
+            serverData.name,
+            serverData.hostname,
+            serverData.os,
+            serverData.sourceType,
+            serverData.physicalCoreCount,
+            serverData.logicalProcessorCount,
+            serverData.totalMemGB,
+            serverData.interfaceName,
+            serverData.interfaceSpeedMbps
+        ]
+    );
+
+    return result.rows[0];
+}
+
+async function saveMetric(
+    serverId,
+    metrics
+) {
+    await pool.query(
+        `
+        INSERT INTO metrics (
+            server_id,
+            cpu_usage,
+            used_mem_gb,
+            free_mem_gb,
+            mem_usage,
+            disk_read_mbps,
+            disk_write_mbps,
+            received_mbps,
+            sent_mbps,
+            network_usage
+        )
+        VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9, $10
+        )
+        `,
+        [
+            serverId,
+            metrics.cpuUsagePercentage,
+            metrics.usedMemGB,
+            metrics.freeMemGB,
+            metrics.memUsagePercentage,
+            metrics.readMBPerSec,
+            metrics.writeMBPerSec,
+            metrics.receivedMbps,
+            metrics.sentMbps,
+            metrics.networkUsagePercentage
+        ]
+    );
+}
+
+async function touchServer(serverId) {
+    await pool.query(
+        `
+        UPDATE servers
+        SET last_seen = NOW()
+        WHERE id = $1
+        `,
+        [serverId]
+    );
+}
+
+async function getServerList() {
+    const result = await pool.query(
+        `
+        SELECT
+            id,
+            name,
+            hostname,
+            os,
+            source_type,
+            physical_core_count,
+            logical_processor_count,
+            total_mem_gb,
+            interface_name,
+            interface_speed_mbps,
+            last_seen,
+        CASE
+            WHEN last_seen IS NOT NULL
+                AND NOW() - last_seen <= INTERVAL '15 seconds'
+            THEN true
+            ELSE false
+        END AS is_online        
+        FROM servers
+        ORDER BY id
+        `
+    );
+
+    return result.rows.map(
+        (row) => ({
+            id: row.id,
+
+            name:
+                row.name,
+
+            hostname:
+                row.hostname,
+
+            os:
+                row.os,
+
+            sourceType:
+                row.source_type,
+
+            physicalCoreCount:
+                row.physical_core_count,
+
+            logicalProcessorCount:
+                row.logical_processor_count,
+
+            totalMemGB:
+                Number(row.total_mem_gb),
+
+            interfaceName:
+                row.interface_name,
+
+            interfaceSpeedMbps:
+                Number(
+                    row.interface_speed_mbps
+                ),
+
+            lastSeen:
+                row.last_seen,
+
+            isOnline:
+                row.is_online
+        })
+    );
+}
+
+async function emitServerList() {
+    const servers =
+        await getServerList();
+
+    io.emit(
+        "serverList",
+        servers
+    );
+}
 
 function startMetricsInterval(networkInfo){
 
@@ -75,14 +280,39 @@ function startMetricsInterval(networkInfo){
                     networkUsagePercentage: networkMetrics.networkUsagePercentage
                 };
 
-                console.log("CurrentMetrics", systemMetrics);
-                io.emit("systemMetrics", systemMetrics);
+                if (localServerId) {
+
+                    io.emit("serverMetrics", {
+                        serverId: localServerId,
+                        metrics: systemMetrics
+                    });
+
+                    try {
+                        await saveMetric(
+                            localServerId,
+                            systemMetrics
+                        );
+
+                        await touchServer(
+                            localServerId
+                        );
+                    }
+                    catch (error) {
+                        console.error(
+                            "Windows metric DB hatası:",
+                            error.message
+                        );
+                    }
+                }
 
                 try {
                     await checkAlarms(systemMetrics);
                 }
                 catch (error) {
-                    console.error("Alarm kontrol hatası:", error);
+                    console.error(
+                        "Alarm kontrol hatası:",
+                        error
+                    );
                 }
                 finally {
                     isMetricsRunning = false;
@@ -137,49 +367,339 @@ const io = new Server(server, {
     }
 });
 
+io.use(async (socket, next) => {
+
+    const {
+        clientType,
+        serverKey,
+        agentSecret
+    } = socket.handshake.auth ?? {};
+
+    // Angular/dashboard bağlantısıysa
+    // agent authentication uygulanmaz.
+    if (clientType !== "agent") {
+        return next();
+    }
+
+    if (!serverKey || !agentSecret) {
+        console.log(
+            "Agent authentication reddedildi: eksik bilgi."
+        );
+
+        return next(
+            new Error("Agent authentication failed.")
+        );
+    }
+
+    try {
+        const result = await pool.query(
+            `
+            SELECT
+                id,
+                agent_secret_hash
+            FROM servers
+            WHERE server_key = $1
+              AND source_type = 'agent'
+            LIMIT 1
+            `,
+            [serverKey]
+        );
+
+        if (result.rows.length === 0) {
+            console.log(
+                "Agent authentication reddedildi: kayıtlı agent yok."
+            );
+
+            return next(
+                new Error("Agent authentication failed.")
+            );
+        }
+
+        const server = result.rows[0];
+
+        if (!server.agent_secret_hash) {
+            console.log(
+                "Agent authentication reddedildi: secret hash yok."
+            );
+
+            return next(
+                new Error("Agent authentication failed.")
+            );
+        }
+
+        const receivedHash =
+            createHash("sha256")
+                .update(agentSecret)
+                .digest();
+
+        const storedHash =
+            Buffer.from(
+                server.agent_secret_hash,
+                "hex"
+            );
+
+        if (
+            receivedHash.length !== storedHash.length ||
+            !timingSafeEqual(
+                receivedHash,
+                storedHash
+            )
+        ) {
+            console.log(
+                "Agent authentication reddedildi: secret yanlış."
+            );
+
+            return next(
+                new Error("Agent authentication failed.")
+            );
+        }
+
+        socket.data.serverId =
+            server.id;
+
+        console.log(
+            `Agent authentication başarılı. serverId: ${server.id}`
+        );
+
+        next();
+
+    }
+    catch (error) {
+        console.error(
+            "Agent authentication hatası:",
+            error.message
+        );
+
+        next(
+            new Error("Agent authentication failed.")
+        );
+    }
+});
+
 /*          !!!   OLAY DİNLEYİCİLERİ   !!!         */
 
 // io.on() socket.io sunucusunda bir olayı dinler, "connection" yeni istemci bağlantısı oluştuğunda tetiklenir.
 // socket yalnızca bağlanan o istemiciyi temsil eder.
-io.on("connection",(socket)=>{
+io.on("connection", async (socket) => {
 
-    if(isShuttingDown){
+    if (isShuttingDown) {
         socket.disconnect(true);
         return;
     }
 
-    console.log("Bağlandı:", socket.id);
+    const clientType =
+        socket.handshake.auth
+            ?.clientType
+        ?? "dashboard";
 
-    if(systemInfo){
-        socket.emit("systemInfo", systemInfo);
+    if (clientType === "agent") {
+
+        const serverKey =
+            socket.handshake.auth.serverKey;
+
+        const serverId =
+            socket.data.serverId;
+
+        console.log(
+            `Agent bağlandı: ${socket.id} | serverId: ${serverId}`
+        );
+
+        socket.on(
+            "agentSystemInfo",
+            async (agentSystemInfo) => {
+
+                try {
+                    await upsertServer({
+                        serverKey,
+
+                        name:
+                            agentSystemInfo.hostname,
+
+                        hostname:
+                            agentSystemInfo.hostname,
+
+                        os:
+                            agentSystemInfo.os,
+
+                        sourceType:
+                            "agent",
+
+                        physicalCoreCount:
+                            agentSystemInfo.physicalCoreCount,
+
+                        logicalProcessorCount:
+                            agentSystemInfo.logicalProcessorCount,
+
+                        totalMemGB:
+                            agentSystemInfo.totalMemGB,
+
+                        interfaceName:
+                            agentSystemInfo.interfaceName,
+
+                        interfaceSpeedMbps:
+                            agentSystemInfo.interfaceSpeedMbps
+                    });
+
+                    console.log(
+                        `Agent bilgileri güncellendi. serverId: ${serverId}`
+                    );
+
+                    await emitServerList();
+                }
+                catch (error) {
+                    console.error(
+                        "Agent sistem bilgisi güncelleme hatası:",
+                        error.message
+                    );
+                }
+            }
+        );
+
+        socket.on(
+            "agentMetrics",
+            async (agentMetrics) => {
+
+                io.emit(
+                    "serverMetrics",
+                    {
+                        serverId,
+                        metrics: agentMetrics
+                    }
+                );
+
+                try {
+                    await saveMetric(
+                        serverId,
+                        agentMetrics
+                    );
+                }
+                catch (error) {
+                    console.error(
+                        "Agent metric DB hatası:",
+                        error.message
+                    );
+                }
+            }
+        );
+
+        socket.on(
+            "agentHeartbeat",
+            async () => {
+
+                try {
+                    await touchServer(
+                        serverId
+                    );
+                }
+                catch (error) {
+                    console.error(
+                        "Heartbeat güncelleme hatası:",
+                        error.message
+                    );
+                }
+            }
+        );
+
+        return;
     }
 
-    socket.on("changeMetricsInterval", (intervalMs)=>{
+    console.log(
+        "Dashboard bağlandı:",
+        socket.id
+    );
 
-        console.log("Süre isteği geldi:",intervalMs,"Socket:",socket.id);
+    try {
+        socket.emit(
+            "serverList",
+            await getServerList()
+        );
+    } catch (error) {
+        console.error(
+            "Server listesi alınamadı:",
+            error.message
+        );
+    }
 
-        if(!allowedMetricsIntervals.includes(intervalMs)) {
-            console.log("Geçersiz metrik aralığı: ", intervalMs);
-            return;
+    socket.on(
+        "changeMetricsInterval",
+        ({ serverId, intervalMs }) => {
+
+            console.log(
+                "Metrik süre isteği:",
+                "Server:", serverId,
+                "Süre:", intervalMs
+            );
+
+            if (
+                !allowedMetricsIntervals.includes(intervalMs)
+            ) {
+                console.log(
+                    "Geçersiz metrik aralığı:",
+                    intervalMs
+                );
+
+                return;
+            }
+
+            // Seçilen server Windows ise
+            if (serverId === localServerId) {
+
+                if (!activeNetworkInfo) {
+                    console.log(
+                        "Windows network bilgisi hazır değil."
+                    );
+
+                    return;
+                }
+
+                metricsIntervalMs = intervalMs;
+
+                startMetricsInterval(
+                    activeNetworkInfo
+                );
+
+                console.log(
+                    `Windows metrik aralığı ${intervalMs} ms oldu.`
+                );
+
+                return;
+            }
+
+            // Seçilen server bir Agent ise
+            const agentSocket =
+                [...io.sockets.sockets.values()]
+                    .find(
+                        connectedSocket =>
+                            connectedSocket.data.serverId
+                            === serverId
+                    );
+
+            if (!agentSocket) {
+                console.log(
+                    `Server ${serverId} için bağlı agent bulunamadı.`
+                );
+
+                return;
+            }
+
+            agentSocket.emit(
+                "changeMetricsInterval",
+                intervalMs
+            );
+
+            console.log(
+                `Server ${serverId} agentına ${intervalMs} ms gönderildi.`
+            );
         }
-
-        if(!activeNetworkInfo){
-            console.log("Network bilgisi henüz hazır değil.");
-            return;
-        }
-
-        metricsIntervalMs = intervalMs;
-        startMetricsInterval(activeNetworkInfo);
-
-        console.log(`Metrik aralığı ${intervalMs} ms olarak değiştirildi.`);
-    });
+    );
 });
 
 /*          !!!   SİSTEM METRİKLERİ   !!!         */
 
 getPhysicalCoreCount((count) => {
-    getNetworkInfo((networkInfo)=>{
-        
+
+    getNetworkInfo(async (networkInfo) => {
+
         activeNetworkInfo = networkInfo;
 
         systemInfo = {
@@ -190,10 +710,59 @@ getPhysicalCoreCount((count) => {
             interfaceSpeedMbps: networkInfo.interfaceSpeedMbps
         };
 
-        console.log("SystemInfo", systemInfo);
-        io.emit("systemInfo", systemInfo);
+        try {
+            const localServer =
+                await upsertServer({
+                    serverKey:
+                        LOCAL_SERVER_KEY,
 
-        startMetricsInterval(networkInfo);
+                    name:
+                        os.hostname(),
+
+                    hostname:
+                        os.hostname(),
+
+                    os:
+                        os.platform(),
+
+                    sourceType:
+                        "local",
+
+                    physicalCoreCount:
+                        systemInfo.physicalCoreCount,
+
+                    logicalProcessorCount:
+                        systemInfo.logicalProcessorCount,
+
+                    totalMemGB:
+                        systemInfo.totalMemGB,
+
+                    interfaceName:
+                        systemInfo.interfaceName,
+
+                    interfaceSpeedMbps:
+                        systemInfo.interfaceSpeedMbps
+                });
+
+            localServerId =
+                localServer.id;
+
+            console.log(
+                `Windows server kaydedildi. serverId: ${localServerId}`
+            );
+
+            await emitServerList();
+        }
+        catch (error) {
+            console.error(
+                "Windows server kayıt hatası:",
+                error.message
+            );
+        }
+
+        startMetricsInterval(
+            networkInfo
+        );
     });
 });
 
@@ -201,6 +770,18 @@ getPhysicalCoreCount((count) => {
 server.listen(3000,()=>{
     console.log("Server çalışmaya başladı!");
 });
+
+serverListInterval = setInterval(async () => {
+    try {
+        await emitServerList();
+    }
+    catch (error) {
+        console.error(
+            "Server durum listesi güncellenemedi:",
+            error.message
+        );
+    }
+}, 5000);
 
 /*          !!!   KAPATMA İŞLEMİ   !!!         */
 
@@ -213,6 +794,7 @@ process.on("SIGINT",()=>{
     console.log("\nKapatma işlemi başlatıldı... ");
 
     clearInterval(cpuInterval);
+    clearInterval(serverListInterval);
 
     stopPowerShellProcess();
 
