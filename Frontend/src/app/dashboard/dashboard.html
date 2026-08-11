@@ -1,33 +1,36 @@
 <main>
 
-  <div class="server-selection">
-    <label for="serverSelect">
-        Sunucu:
-    </label>
+  <div class="top-bar">
 
-    <select
-      id="serverSelect"
-      [value]="socketService.selectedServerId() ?? ''"
-      (change)="socketService.selectServer($any($event.target).value)"
-    >
-      @for (
-        server of socketService.servers();
-        track server.id
-      ) {
+    <div class="server-selection">
+      <label for="serverSelect">Sunucu:</label>
+
+      <select id="serverSelect"
+        [value]="socketService.selectedServerId() ?? ''"
+        (change)="socketService.selectServer($any($event.target).value)"
+      >
+        @for (
+          server of socketService.servers();
+          track server.id
+        ) {
           <option [value]="server.id">
             {{ server.name }} - {{ server.os }}
             - {{ server.isOnline ? 'Online' : 'Offline' }}
           </option>
         }
-    </select>
+      </select>
+    </div>
+
+    <div class="top-actions">
+      @if(isAdmin){
+        <button type="button" class="admin-button" (click)="goToAdmin()">Admin Paneli</button>
+      }
+
+      <button type="button" class="exit" (click)="logout()">Çıkış Yap</button>
+    </div>
+
   </div>
 
-
-
-  @if(isAdmin){
-    <button type="button" (click)="goToAdmin()">Admin Paneli</button>
-  }
-  <button class="exit" (click)="logout()">Çıkış Yap</button>
 
 
   <section class="system-info">
