@@ -306,11 +306,16 @@ function startMetricsInterval(networkInfo){
                 }
 
                 try {
-                    await checkAlarms(systemMetrics);
+                    if (localServerId) {
+                        await checkAlarms(
+                            localServerId,
+                            systemMetrics
+                        );
+                    }
                 }
                 catch (error) {
                     console.error(
-                        "Alarm kontrol hatası:",
+                        "Windows alarm kontrol hatası:",
                         error
                     );
                 }
@@ -577,6 +582,19 @@ io.on("connection", async (socket) => {
                     console.error(
                         "Agent metric DB hatası:",
                         error.message
+                    );
+                }
+
+                try {
+                    await checkAlarms(
+                        serverId,
+                        agentMetrics
+                    );
+                }
+                catch (error) {
+                    console.error(
+                        "Agent alarm kontrol hatası:",
+                        error
                     );
                 }
             }

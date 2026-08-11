@@ -15,12 +15,14 @@ async function handleAlarmRoutes(req, res) {
 
             try {
                 const addAlarm = JSON.parse(body);
+
+                const serverId = addAlarm.serverId;
                 const recipientUserId = addAlarm.recipientUserId;
                 const metricType = addAlarm.metricType;
                 const threshold = addAlarm.threshold;
                 const severity = addAlarm.severity;
 
-                if (!recipientUserId || !metricType || threshold === null || threshold === undefined || !severity) {
+                if (!Number.isInteger(serverId) || serverId <= 0 || !recipientUserId || !metricType || threshold === null || threshold === undefined || !severity) {
 
                     res.writeHead(400,{
                         "Content-Type": "application/json; charset=utf-8"
@@ -35,14 +37,16 @@ async function handleAlarmRoutes(req, res) {
 
                 const result = await pool.query(
                     `INSERT INTO alarms (
+                    server_id,
                     recipient_user_id,
                     metric_type,
                     threshold,
                     severity
                     )
-                    VALUES ($1, $2, $3, $4)
-                    RETURNING id, recipient_user_id, metric_type, threshold, severity, is_active, created_at`,
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING id, server_id, recipient_user_id, metric_type, threshold, severity, is_active, created_at`,
                     [
+                        serverId,
                         recipientUserId,
                         metricType,
                         threshold,
@@ -85,7 +89,7 @@ async function handleAlarmRoutes(req, res) {
 
             const result = await pool.query(
                 `SELECT 
-                    alarms.id, alarms.recipient_user_id, users.username, users.name, users.surname, alarms.metric_type,
+                    alarms.id, alarms.server_id, alarms.recipient_user_id, users.username, users.name, users.surname, alarms.metric_type,
                     alarms.threshold, alarms.severity, alarms.is_active, alarms.created_at
                 FROM alarms
                 INNER JOIN users
@@ -145,6 +149,7 @@ async function handleAlarmRoutes(req, res) {
         req.on("end", async () => {
             try {
                 const {
+                    serverId,
                     recipientUserId,
                     metricType,
                     threshold,
@@ -153,6 +158,8 @@ async function handleAlarmRoutes(req, res) {
                 } = JSON.parse(body);
 
                 if (
+                    !Number.isInteger(serverId) ||
+                    serverId <= 0 ||
                     recipientUserId === null ||
                     recipientUserId === undefined ||
                     !metricType ||
@@ -175,14 +182,16 @@ async function handleAlarmRoutes(req, res) {
                 const result = await pool.query(
                     `UPDATE alarms
                     SET
-                        recipient_user_id = $1,
-                        metric_type = $2,
-                        threshold = $3,
-                        severity = $4,
-                        is_active = $5
-                    WHERE id = $6
-                    RETURNING id, recipient_user_id, metric_type, threshold, severity, is_active, created_at`,
+                        server_id = $1,
+                        recipient_user_id = $2,
+                        metric_type = $3,
+                        threshold = $4,
+                        severity = $5,
+                        is_active = $6
+                    WHERE id = $7
+                    RETURNING id, server_id, recipient_user_id, metric_type, threshold, severity, is_active, created_at`,
                     [
+                        serverId,
                         recipientUserId,
                         metricType,
                         threshold,

@@ -23,6 +23,18 @@
 
 <form (ngSubmit)="addAlarm()">
 
+    <select name="serverId" [ngModel]="selectedServerId()" (ngModelChange)="selectAlarmServer($event)" required>
+
+        <option [ngValue]="null" disabled>Sunucu Seçiniz</option>
+
+        @for (server of servers(); track server.id) {
+            <option [ngValue]="server.id">
+                {{ server.hostname }} - {{ server.os }}
+            </option>
+        }
+
+    </select>
+
     <select name="recipientUserId" [(ngModel)]="recipientUserId" required>
         
         <option [ngValue]="null" disabled>Kullanıcı Seçiniz</option>
@@ -72,6 +84,7 @@
         <table>
             <thead>
                 <tr>
+                    <th>Sunucu</th>
                     <th>Kullanıcı</th>
                     <th>Metrik</th>
                     <th>Eşik</th>
@@ -84,7 +97,24 @@
             <tbody>
                 @for (alarm of alarms(); track alarm.id) {
                     <tr>
+
+                        <td>
+                            @if (editingAlarmId() === alarm.id) {
+                                <select [(ngModel)]="editServerId">
+                                    @for (server of servers(); track server.id) {
+                                        <option [ngValue]="server.id">
+                                            {{ server.hostname }} - {{ server.os }}
+                                        </option>
+                                    }
+                                </select>
+                            }
+                            @else {
+                                {{ getServerName(alarm.server_id) }}
+                            }
+                        </td>
+
                         @if (editingAlarmId() === alarm.id) {
+
                             <td>
                                 <select [(ngModel)]="editRecipientUserId">
                                     @for (user of users(); track user.id) {
@@ -106,7 +136,12 @@
                             </td>
 
                             <td>
-                                <input type="number" [(ngModel)]="editThreshold" min="0" step="0.01">
+                                <input
+                                    type="number"
+                                    [(ngModel)]="editThreshold"
+                                    min="0"
+                                    step="0.01"
+                                >
                             </td>
 
                             <td>
@@ -126,28 +161,61 @@
                             </td>
 
                             <td>
-                                <button type="button" (click)="updateAlarm()">Kaydet</button>
-                                <button type="button" (click)="cancelEditingAlarm()">İptal</button>
+                                <button
+                                    type="button"
+                                    (click)="updateAlarm()"
+                                >
+                                    Kaydet
+                                </button>
+
+                                <button
+                                    type="button"
+                                    (click)="cancelEditingAlarm()"
+                                >
+                                    İptal
+                                </button>
                             </td>
                         }
                         @else {
+
                             <td>
-                                {{ alarm.username }} - {{ alarm.name }} {{ alarm.surname }}
+                                {{ alarm.username }} -
+                                {{ alarm.name }} {{ alarm.surname }}
                             </td>
 
-                            <td>{{ alarm.metric_type }}</td>
-                            <td>{{ alarm.threshold }}</td>
-                            <td>{{ alarm.severity }}</td>
+                            <td>
+                                {{ alarm.metric_type }}
+                            </td>
+
+                            <td>
+                                {{ alarm.threshold }}
+                            </td>
+
+                            <td>
+                                {{ alarm.severity }}
+                            </td>
 
                             <td>
                                 {{ alarm.is_active ? 'Aktif' : 'Pasif' }}
                             </td>
 
                             <td>
-                                <button type="button" (click)="startEditingAlarm(alarm)">Düzenle</button>
-                                <button type="button" (click)="deleteAlarm(alarm.id)">Sil</button>
+                                <button
+                                    type="button"
+                                    (click)="startEditingAlarm(alarm)"
+                                >
+                                    Düzenle
+                                </button>
+
+                                <button
+                                    type="button"
+                                    (click)="deleteAlarm(alarm.id)"
+                                >
+                                    Sil
+                                </button>
                             </td>
                         }
+
                     </tr>
                 }
             </tbody>

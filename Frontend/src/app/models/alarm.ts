@@ -1,5 +1,6 @@
 export interface Alarm {
     id: number;
+    server_id: number;
     recipient_user_id: number;
     username: string;
     name: string;

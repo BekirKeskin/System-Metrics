@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { User } from '../models/user';
 import { Alarm } from '../models/alarm';
+import { Socket } from '../services/socket';
 
 @Component({
   selector: 'app-admin',
@@ -12,7 +13,12 @@ import { Alarm } from '../models/alarm';
   styleUrl: './admin.scss',
 })
 export class Admin implements OnInit {
+
   private readonly http = inject(HttpClient);
+  private readonly socketService = inject(Socket);
+
+  servers = this.socketService.servers;
+  selectedServerId = this.socketService.selectedServerId;
 
   users = signal<User[]>([]);
   alarms = signal<Alarm[]>([]);
@@ -29,6 +35,7 @@ export class Admin implements OnInit {
   threshold: number | null = null;
   severity = '';
 
+  editServerId: number | null = null;
   editRecipientUserId: number | null = null;
   editMetricType = '';
   editThreshold: number | null = null;
@@ -80,9 +87,32 @@ export class Admin implements OnInit {
     });
   }
 
+  selectAlarmServer(serverId: number | string): void {
+    this.socketService.selectServer(serverId);
+  }
+
+  getServerName(serverId: number): string {
+    const server = this.servers().find(
+      server => server.id === serverId
+    );
+
+    if (!server) {
+      return `Sunucu ${serverId}`;
+    }
+    return `${server.hostname} - ${server.os}`;
+  }
+
   addAlarm(): void{
 
+    const serverId = this.socketService.selectedServerId();
+
+    if (serverId === null) {
+      console.log("Alarm için sunucu seçilmedi.");
+      return;
+    }
+
     const alarmData = {
+      serverId,
       recipientUserId: this.recipientUserId,
       metricType: this.metricType,
       threshold: this.threshold,
@@ -126,6 +156,7 @@ export class Admin implements OnInit {
   startEditingAlarm(alarm: Alarm): void {
     this.editingAlarmId.set(alarm.id);
 
+    this.editServerId = alarm.server_id;
     this.editRecipientUserId = alarm.recipient_user_id;
     this.editMetricType = alarm.metric_type;
     this.editThreshold = Number(alarm.threshold);
@@ -136,6 +167,7 @@ export class Admin implements OnInit {
   cancelEditingAlarm(): void {
     this.editingAlarmId.set(null);
 
+    this.editServerId = null;
     this.editRecipientUserId = null;
     this.editMetricType = '';
     this.editThreshold = null;
@@ -148,6 +180,7 @@ export class Admin implements OnInit {
 
     if (
       alarmId === null ||
+      this.editServerId === null ||
       this.editRecipientUserId === null ||
       this.editThreshold === null ||
       !this.editMetricType ||
@@ -158,6 +191,7 @@ export class Admin implements OnInit {
     }
 
     const updatedAlarmData = {
+      serverId: this.editServerId,
       recipientUserId: this.editRecipientUserId,
       metricType: this.editMetricType,
       threshold: this.editThreshold,
