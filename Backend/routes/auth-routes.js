@@ -1,7 +1,8 @@
 const pool = require("../db");
 const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
-async function handleLoginRoutes(req, res, loginToken) {
+async function handleLoginRoutes(req, res, jwtSecret) {
 
     if(req.method === "POST" && req.url === "/login"){ // iki isteğinde doğruluğunu onaylıyoruz
         
@@ -72,6 +73,20 @@ async function handleLoginRoutes(req, res, loginToken) {
                     return;
                 }
 
+                
+                const jwtToken = jwt.sign(
+                    {
+                        userId: user.id,
+                        username: user.username,
+                        role: user.role
+                    },
+                    jwtSecret,
+                    {
+                        expiresIn: "1h"
+                    }
+                );
+                
+
                 res.writeHead(200, {
                     "Content-Type": "application/json; charset=utf-8"
                 });
@@ -79,7 +94,7 @@ async function handleLoginRoutes(req, res, loginToken) {
                 res.end(JSON.stringify({
                     success: true,
                     message: "Giriş başarılı.",
-                    token: loginToken,
+                    token: jwtToken,
                     userId: user.id,
                     username: user.username,
                     role: user.role

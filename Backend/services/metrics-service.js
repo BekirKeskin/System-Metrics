@@ -62,7 +62,7 @@ function getPhysicalCoreCount(callback) {
 
 function getNetworkInfo(callback){
     exec(
-        "powerShell -NoProfile -Command \"Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1 Name, InterfaceDescription, LinkSpeed | ConvertTo-Json -Compress\"",
+        "powerShell -NoProfile -Command \"$route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.State -eq 'Alive' } | Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1; Get-NetAdapter -InterfaceIndex $route.InterfaceIndex | Select-Object Name, InterfaceDescription, LinkSpeed | ConvertTo-Json -Compress\"",
         (error, stdout, stderr) => {
             if (error) {
                 console.error("Ağ bilgisi alınamadı: ", error);

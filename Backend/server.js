@@ -1,5 +1,6 @@
 /*          !!!   MODÜLLER   !!!          */
 
+require("dotenv").config();
 const http = require("node:http");
 const { Server } = require("socket.io");
 const os = require("node:os");
@@ -11,13 +12,13 @@ const handleLoginRoutes = require("./routes/auth-routes");
 const checkAlarms = require("./services/alarm-service");
 const { startPowerShellProcess, stopPowerShellProcess } = require("./services/powershell-service");
 const { getCpuTimes, calculateCpuUsage, getRamMetrics, getPhysicalCoreCount, getNetworkInfo, calculateNetworkMetrics, getUnitedDynamicMetrics } = require("./services/metrics-service");
-
+const verifyToken = require("./middleware/auth-middleware");
 
 /*          !!!   DEĞİŞKENLER   !!!         */
 
 const allowedMetricsIntervals = [1000, 5000, 10000];
 const LOCAL_SERVER_KEY = `local:${os.hostname()}`;
-const LOGIN_TOKEN = "system-metrics-auth-token";
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const cpuList = os.cpus();
 const cpuCount = cpuList.length;
@@ -336,7 +337,7 @@ const server = http.createServer(async (req, res)=>{
     // bu nedenle res.setHeader kontrollerini ekliyoruz. setHeader HTTP response a header eklemek için kullanılır
     res.setHeader("Access-Control-Allow-Origin", "http://localhost:4200"); // Angular frontende izin
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"); // Hangi HTTP yöntemlerine izin verildiği
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");  //Frontend'in Content-Type application/json headerını kullanmasına izin verir.
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");  //Frontend'in Content-Type application/json headerını kullanmasına izin verir.
 
     if(req.method === "OPTIONS"){
         res.writeHead(204); // NO CONTENT = istek başarılı ama body yok
@@ -344,8 +345,30 @@ const server = http.createServer(async (req, res)=>{
         return;
     }
 
-    if (await handleLoginRoutes(req, res, LOGIN_TOKEN)) {
+    if (await handleLoginRoutes(req, res, JWT_SECRET)) {
         return;
+    }
+
+    if (req.url.startsWith("/admin/")) {
+
+        const verifiedUser = verifyToken(req, res, JWT_SECRET);
+
+        if (!verifiedUser) {
+            return;
+        }
+
+        if (verifiedUser.role !== "admin") {
+            res.writeHead(403, {
+                "Content-Type": "application/json; charset=utf-8"
+            });
+
+            res.end(JSON.stringify({
+                success: false,
+                message: "Bu işlem için admin yetkisi gerekiyor."
+            }));
+
+            return;
+        }
     }
 
     if (await handleUserRoutes(req, res)) {

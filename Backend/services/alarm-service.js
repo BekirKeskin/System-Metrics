@@ -1,7 +1,9 @@
 const pool = require("../db");
 const sendAlarmEmail = require("./mail-service");
 
-const triggeredAlarmIds = new Set();
+const alarmLastSentAt = new Map();
+
+const ALARM_REPEAT_INTERVAL_MS = 1800 * 1000;
 
 async function checkAlarms(serverId, systemMetrics) {
 
@@ -69,30 +71,37 @@ async function checkAlarms(serverId, systemMetrics) {
 
         for (const alarm of highestExceededAlarms.values()) {
 
-            if (!triggeredAlarmIds.has(alarm.id)) {
+            const lastSentAt = alarmLastSentAt.get(alarm.id);
 
-                console.log("Alarm tetiklendi:", alarm);
+            if (lastSentAt) {
+                const timeSinceLastEmail = Date.now() - lastSentAt;
 
-                let currentValue;
-
-                if (alarm.metric_type === "cpu") {
-                    currentValue = systemMetrics.cpuUsagePercentage;
-                }
-                else if (alarm.metric_type === "ram") {
-                    currentValue = systemMetrics.memUsagePercentage;
-                }
-                else {
+                if (timeSinceLastEmail < ALARM_REPEAT_INTERVAL_MS) {
                     continue;
                 }
-
-                sendAlarmEmail(
-                    alarm.email,
-                    `Eşik Aşımı - ${alarm.hostname}`,
-                    `Sunucu: ${alarm.hostname} (${alarm.os}) Metrik adı: ${alarm.metric_type} Anlık değer: ${currentValue} Eşik değeri: ${alarm.threshold}`
-                );
-
-                triggeredAlarmIds.add(alarm.id);
             }
+
+            console.log("Alarm tetiklendi:", alarm);
+
+            let currentValue;
+
+            if (alarm.metric_type === "cpu") {
+                currentValue = systemMetrics.cpuUsagePercentage;
+            }
+            else if (alarm.metric_type === "ram") {
+                currentValue = systemMetrics.memUsagePercentage;
+            }
+            else {
+                continue;
+            }
+
+            sendAlarmEmail(
+                alarm.email,
+                `Eşik Aşımı - ${alarm.hostname}`,
+                `Sunucu: ${alarm.hostname} (${alarm.os}) Metrik adı: ${alarm.metric_type} Anlık değer: ${currentValue} Eşik değeri: ${alarm.threshold}`
+            );
+
+            alarmLastSentAt.set(alarm.id, Date.now());
         }
 
     }

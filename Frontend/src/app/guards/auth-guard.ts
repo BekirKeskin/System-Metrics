@@ -7,7 +7,7 @@ export const authGuard: CanActivateFn = (route, state) => {
   const router = inject(Router);
   const token = localStorage.getItem('authToken');
 
-  if(token === 'system-metrics-auth-token') {
+  if(token) {
     return true;
   }
 
