@@ -1,5 +1,9 @@
 const pool = require("../db");
 
+const allowedMetricTypes = ["cpu", "ram"];
+const allowedSeverityTypes = ["low", "medium", "high", "critical"];
+
+
 async function handleAlarmRoutes(req, res) {
     
     if(req.method === "POST" && req.url === "/admin/alarms") {
@@ -22,7 +26,17 @@ async function handleAlarmRoutes(req, res) {
                 const threshold = addAlarm.threshold;
                 const severity = addAlarm.severity;
 
-                if (!Number.isInteger(serverId) || serverId <= 0 || !recipientUserId || !metricType || threshold === null || threshold === undefined || !severity) {
+
+                if (!Number.isInteger(serverId) ||
+                    serverId <= 0 ||
+                    !Number.isInteger(recipientUserId) ||
+                    recipientUserId <= 0 ||
+                    !allowedMetricTypes.includes(metricType) ||
+                    !Number.isFinite(threshold) ||
+                    threshold <= 0 ||
+                    threshold > 100 ||
+                    !allowedSeverityTypes.includes(severity)
+                ) {
 
                     res.writeHead(400,{
                         "Content-Type": "application/json; charset=utf-8"
@@ -30,8 +44,48 @@ async function handleAlarmRoutes(req, res) {
                     
                     res.end(JSON.stringify({
                         success: false,
-                        message: "Tüm alanları giriniz !!!"
+                        message: "Alarm bilgileri eksik veya geçersiz !!!"
                     }));
+                    return;
+                }
+
+                const serverResult = await pool.query(
+                    `SELECT id
+                    FROM servers
+                    WHERE id = $1`,
+                    [serverId]
+                );
+
+                if (serverResult.rows.length === 0) {
+                    res.writeHead(400, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: false,
+                        message: "Geçersiz sunucu seçildi."
+                    }));
+
+                    return;
+                }
+
+                const userResult = await pool.query(
+                    `SELECT id
+                    FROM users
+                    WHERE id = $1`,
+                    [recipientUserId]
+                );
+
+                if (userResult.rows.length === 0) {
+                    res.writeHead(400, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: false,
+                        message: "Geçersiz kullanıcı seçildi."
+                    }));
+
                     return;
                 }
 
@@ -160,12 +214,13 @@ async function handleAlarmRoutes(req, res) {
                 if (
                     !Number.isInteger(serverId) ||
                     serverId <= 0 ||
-                    recipientUserId === null ||
-                    recipientUserId === undefined ||
-                    !metricType ||
-                    threshold === null ||
-                    threshold === undefined ||
-                    !severity ||
+                    !Number.isInteger(recipientUserId) ||
+                    recipientUserId <= 0 ||
+                    !allowedMetricTypes.includes(metricType) ||
+                    !Number.isFinite(threshold) ||
+                    threshold <= 0 ||
+                    threshold > 100 ||
+                    !allowedSeverityTypes.includes(severity) ||
                     typeof isActive !== "boolean"
                 )
                 {
@@ -175,7 +230,43 @@ async function handleAlarmRoutes(req, res) {
 
                     return res.end(JSON.stringify({
                         success: false,
-                        message: "Güncellenecek alarm bilgileri eksik."
+                        message: "Güncellenecek alarm bilgileri eksik veya geçersiz."
+                    }));
+                }
+
+                const serverResult = await pool.query(
+                    `SELECT id
+                    FROM servers
+                    WHERE id = $1`,
+                    [serverId]
+                );
+
+                if (serverResult.rows.length === 0) {
+                    res.writeHead(400, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    return res.end(JSON.stringify({
+                        success: false,
+                        message: "Geçersiz sunucu seçildi."
+                    }));
+                }
+
+                const userResult = await pool.query(
+                    `SELECT id
+                    FROM users
+                    WHERE id = $1`,
+                    [recipientUserId]
+                );
+
+                if (userResult.rows.length === 0) {
+                    res.writeHead(400, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    return res.end(JSON.stringify({
+                        success: false,
+                        message: "Geçersiz kullanıcı seçildi."
                     }));
                 }
 

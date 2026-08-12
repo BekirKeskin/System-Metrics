@@ -21,7 +21,28 @@ async function handleUserRoutes(req, res) {
                 const email = addData.email;
                 const password = addData.password;
 
-                if (!username || !name || !surname || !email || !password) {
+                const normalizedUsername = typeof username === "string" ? username.trim() : "";
+                const normalizedName = typeof name === "string" ? name.trim() : "";
+                const normalizedSurname = typeof surname === "string" ? surname.trim() : "";
+                const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+                const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+                if (!normalizedUsername ||
+                    normalizedUsername.length < 2 ||
+                    normalizedUsername.length > 30 ||
+                    !normalizedName ||
+                    normalizedName.length < 2 ||
+                    normalizedName.length > 50 ||
+                    !normalizedSurname ||
+                    normalizedSurname.length < 2 ||
+                    normalizedSurname.length > 50 ||
+                    !normalizedEmail ||
+                    normalizedEmail.length > 254 ||
+                    !emailPattern.test(normalizedEmail) ||
+                    typeof password !== "string" ||
+                    password.length < 8 ||
+                    password.length > 72
+                ) {
 
                     res.writeHead(400,{
                         "Content-Type": "application/json; charset=utf-8"
@@ -32,6 +53,39 @@ async function handleUserRoutes(req, res) {
                         message: "Tüm alanları giriniz !!!"
                     }));
                     return;
+                }
+
+                const existingUserResult = await pool.query(
+                    `SELECT username, email
+                    FROM users
+                    WHERE username = $1 OR email = $2`,
+                    [normalizedUsername, normalizedEmail]
+                );
+
+                if (existingUserResult.rows.some(
+                    user => user.username === normalizedUsername
+                )) {
+                    res.writeHead(409, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    return res.end(JSON.stringify({
+                        success: false,
+                        message: "Bu kullanıcı adı zaten kullanılıyor."
+                    }));
+                }
+
+                if (existingUserResult.rows.some(
+                    user => user.email === normalizedEmail
+                )) {
+                    res.writeHead(409, {
+                        "Content-Type": "application/json; charset=utf-8"
+                    });
+
+                    return res.end(JSON.stringify({
+                        success: false,
+                        message: "Bu e-posta adresi zaten kullanılıyor."
+                    }));
                 }
 
                 const passwordHash = await bcrypt.hash(password,10);
@@ -48,10 +102,10 @@ async function handleUserRoutes(req, res) {
                     VALUES ($1, $2, $3, $4, $5, $6)
                     RETURNING id, username, name, surname, email, role, is_active, created_at`,
                     [
-                        username,
-                        name,
-                        surname,
-                        email,
+                        normalizedUsername,
+                        normalizedName,
+                        normalizedSurname,
+                        normalizedEmail,
                         passwordHash,
                         "user"
                     ]
