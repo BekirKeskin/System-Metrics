@@ -26,7 +26,7 @@ export class Login {
     };
 
     this.http.post<{success: boolean; message: string; token: string; userId: number; username: string; role: string;}>
-    ('http://localhost:3000/login', loginData)
+    ('http://localhost:3000/login', loginData, {withCredentials: true})
     .subscribe({
       next: (response) => {
         localStorage.setItem('authToken', response.token);

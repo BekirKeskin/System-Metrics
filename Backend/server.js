@@ -44,6 +44,11 @@ const server = http.createServer(async (req, res) => {
         "Content-Type, Authorization"
     );
 
+    res.setHeader(
+        "Access-Control-Allow-Credentials",
+        "true"
+    );
+
     if (req.method === "OPTIONS") {
         res.writeHead(204);
         res.end();

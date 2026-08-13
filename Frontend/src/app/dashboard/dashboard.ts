@@ -4,6 +4,7 @@ import { Chart } from 'chart.js/auto';
 import { Socket } from '../services/socket';
 import { CpuHistoryService } from '../services/cpu-history-service';
 import { CpuHistoryPoint } from '../models/cpu-history';
+import { HttpClient } from '@angular/common/http';
 
 @Component({
   selector: 'app-dashboard',
@@ -22,6 +23,7 @@ export class Dashboard implements AfterViewInit, OnDestroy {
 
   private readonly router = inject(Router);
   private readonly cpuHistoryService = inject(CpuHistoryService);
+  private readonly http = inject(HttpClient);
 
   readonly cpuHistory = signal<CpuHistoryPoint[]>([]);
 
@@ -188,6 +190,30 @@ export class Dashboard implements AfterViewInit, OnDestroy {
   }
 
   logout() {
+
+    this.http.post('http://localhost:3000/logout',{},
+      {
+        withCredentials: true
+      }
+    )
+    .subscribe({
+      next: () => {
+        this.clearLocalSession();
+      },
+
+      error: (error) => {
+        console.error(
+          'Logout hatası:',
+          error
+        );
+
+        this.clearLocalSession();
+      }
+    });
+  }
+
+  private clearLocalSession() {
+
     localStorage.removeItem('authToken');
     localStorage.removeItem('userId');
     localStorage.removeItem('username');
