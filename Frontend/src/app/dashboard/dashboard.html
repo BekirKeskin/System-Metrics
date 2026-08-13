@@ -5,7 +5,8 @@
     <div class="server-selection">
       <label for="serverSelect">Sunucu:</label>
 
-      <select id="serverSelect"
+      <select
+        id="serverSelect"
         [value]="socketService.selectedServerId() ?? ''"
         (change)="socketService.selectServer($any($event.target).value)"
       >
@@ -22,33 +23,68 @@
     </div>
 
     <div class="top-actions">
-      @if(isAdmin){
-        <button type="button" class="admin-button" (click)="goToAdmin()">Admin Paneli</button>
+
+      @if (isAdmin) {
+        <button type="button" class="admin-button" (click)="goToAdmin()">
+          Admin Paneli
+        </button>
       }
 
       <button type="button" class="exit" (click)="logout()">Çıkış Yap</button>
+
     </div>
 
   </div>
-
 
 
   <section class="system-info">
     <h2>Sistem Bilgileri</h2>
 
     <div class="info-grid">
-      @if(socketService.selectedServer(); as systemInfo){
-        <p>Çekirdek: {{systemInfo.physicalCoreCount}}</p>
-        <p>Thread: {{systemInfo.logicalProcessorCount}}</p>
-        <p>Toplam RAM: {{systemInfo.totalMemGB}} GB</p>
-        <p>Aktif Bağlantı: {{systemInfo.interfaceName}}</p>
-        <p>Bağlantı Kapasitesi: {{systemInfo.interfaceSpeedMbps}} Mbps</p>
+
+      @if (socketService.selectedServer(); as systemInfo) {
+
+        <p>
+          Son Görülme:
+          {{ formatLastSeen(systemInfo.lastSeen) }}
+        </p>
+
+        <p>
+          Çekirdek:
+          {{ systemInfo.physicalCoreCount }}
+        </p>
+
+        <p>
+          Thread:
+          {{ systemInfo.logicalProcessorCount }}
+        </p>
+
+        <p>
+          Toplam RAM:
+          {{ systemInfo.totalMemGB }} GB
+        </p>
+
+        <p>
+          Aktif Bağlantı:
+          {{ systemInfo.interfaceName }}
+        </p>
+
+        <p>
+          Bağlantı Kapasitesi:
+          {{ systemInfo.interfaceSpeedMbps }} Mbps
+        </p>
+
       }
+
     </div>
   </section>
 
+
   <div class="interval-selector">
-    <label for="metricsInterval">Güncelleme süresi:</label>
+
+    <label for="metricsInterval">
+      Güncelleme süresi:
+    </label>
 
     <select id="metricsInterval" (change)="changeMetricsInterval($event)">
 
@@ -57,23 +93,74 @@
       <option value="10000">10 saniye</option>
 
     </select>
+
   </div>
 
+
   <section class="system-metrics">
+
     <h2>Sistem Metrikleri</h2>
 
     <div class="metrics-grid">
-      @if(socketService.selectedMetrics(); as systemMetrics){
-        <p>CPU: {{systemMetrics.cpuUsagePercentage}}%</p>
-        <p>Kullanılan RAM: {{systemMetrics.usedMemGB}} GB</p>
-        <p>Boş RAM: {{systemMetrics.freeMemGB}} GB</p>
-        <p>RAM: {{systemMetrics.memUsagePercentage}}%</p>
-        <p>Okuma: {{systemMetrics.readMBPerSec}} MB/s</p>
-        <p>Yazma: {{systemMetrics.writeMBPerSec}} MB/s</p>
-        <p>Alınan: {{systemMetrics.receivedMbps}} Mbps</p>
-        <p>İletilen: {{systemMetrics.sentMbps}} Mbps</p>
-        <p>Yüzdelik Bağlantı: {{systemMetrics.networkUsagePercentage}}%</p>
+
+      <div class="cpu-metric-card" [style.display]="socketService.selectedMetrics() ? 'flex' : 'none'">
+
+        @if (socketService.selectedMetrics(); as systemMetrics) {
+          <div class="cpu-value">
+            {{ systemMetrics.cpuUsagePercentage }}%
+          </div>
+        }
+
+        <div class="cpu-mini-chart">
+          <canvas #cpuChart></canvas>
+        </div>
+
+      </div>
+
+      @if (socketService.selectedMetrics(); as systemMetrics) {
+
+        <p>
+          Kullanılan RAM:
+          {{ systemMetrics.usedMemGB }} GB
+        </p>
+
+        <p>
+          Boş RAM:
+          {{ systemMetrics.freeMemGB }} GB
+        </p>
+
+        <p>
+          RAM:
+          {{ systemMetrics.memUsagePercentage }}%
+        </p>
+
+        <p>
+          Okuma:
+          {{ systemMetrics.readMBPerSec }} MB/s
+        </p>
+
+        <p>
+          Yazma:
+          {{ systemMetrics.writeMBPerSec }} MB/s
+        </p>
+
+        <p>
+          Alınan:
+          {{ systemMetrics.receivedMbps }} Mbps
+        </p>
+
+        <p>
+          İletilen:
+          {{ systemMetrics.sentMbps }} Mbps
+        </p>
+
+        <p>
+          Yüzdelik Bağlantı:
+          {{ systemMetrics.networkUsagePercentage }}%
+        </p>
+
       }
+
     </div>
   </section>
 

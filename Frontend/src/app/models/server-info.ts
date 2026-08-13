@@ -5,8 +5,7 @@ export interface ServerInfo {
     hostname: string;
     os: string;
 
-    sourceType:
-        'local' | 'agent';
+    sourceType: 'local' | 'agent';
 
     physicalCoreCount: number;
     logicalProcessorCount: number;

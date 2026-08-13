@@ -35,6 +35,27 @@ async function saveMetric(serverId, metrics) {
     );
 }
 
+async function getCpuHistory(serverId, limit = 60) {
+    const result = await pool.query(
+        `
+        SELECT
+            cpu_usage,
+            recorded_at
+        FROM metrics
+        WHERE server_id = $1
+        ORDER BY recorded_at DESC
+        LIMIT $2
+        `,
+        [
+            serverId,
+            limit
+        ]
+    );
+
+    return result.rows.reverse();
+}
+
 module.exports = {
-    saveMetric
+    saveMetric,
+    getCpuHistory
 };
