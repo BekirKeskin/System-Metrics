@@ -6,7 +6,7 @@ const { Server } = require("socket.io");
 
 const handleAlarmRoutes = require("./routes/alarm-routes");
 const handleUserRoutes = require("./routes/user-routes");
-const handleLoginRoutes = require("./routes/auth-routes");
+const handleAuthRoutes = require("./routes/auth-routes");
 const handleMetricRoutes = require("./routes/metric-routes");
 
 const verifyToken = require("./middleware/auth-middleware");
@@ -18,10 +18,57 @@ const handleDashboardConnection = require("./socket/dashboard-handler");
 const createWindowsMonitor = require("./services/windows-monitor-service");
 const createServerListService = require("./services/server-list-service");
 
+const publicRouteHandlers = [
+    (req, res) => handleAuthRoutes(req, res, JWT_SECRET)
+];
+
+const protectedRouteHandlers = [
+    handleUserRoutes,
+    handleAlarmRoutes,
+    handleMetricRoutes
+];
+
 /*          !!!   DEĞİŞKENLER   !!!         */
 
 const JWT_SECRET = process.env.JWT_SECRET;
 let isShuttingDown = false;
+
+const accessRules = [
+    {
+        prefix: "/admin/",
+        authorize: (req, res) => {
+
+            const verifiedUser = verifyToken(req, res, JWT_SECRET);
+
+            if (!verifiedUser) {
+                return false;
+            }
+
+            if (verifiedUser.role !== "admin") {
+
+                res.writeHead(403, {
+                    "Content-Type": "application/json; charset=utf-8"
+                });
+
+                res.end(JSON.stringify({
+                    success: false,
+                    message: "Bu işlem için admin yetkisi gerekiyor."
+                }));
+                return false;
+            }
+            return true;
+        }
+    },
+
+    {
+        prefix: "/metrics/",
+        authorize: (req, res) => {
+            const verifiedUser = verifyToken(req, res, JWT_SECRET);
+
+            return Boolean(verifiedUser);
+        }
+    }
+];
 
 /*          !!!   SERVER   !!!         */
 
@@ -29,25 +76,10 @@ const server = http.createServer(async (req, res) => {
 
     // cors yalnızca socket.io tarafını yönettiği için node:http ile yazılan
     // cevaplara otomatik uygulanmaz.
-    res.setHeader(
-        "Access-Control-Allow-Origin",
-        "http://localhost:4200"
-    );
-
-    res.setHeader(
-        "Access-Control-Allow-Methods",
-        "GET, POST, PUT, DELETE, OPTIONS"
-    );
-
-    res.setHeader(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization"
-    );
-
-    res.setHeader(
-        "Access-Control-Allow-Credentials",
-        "true"
-    );
+    res.setHeader("Access-Control-Allow-Origin", "http://localhost:4200");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
 
     if (req.method === "OPTIONS") {
         res.writeHead(204);
@@ -55,59 +87,31 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    if (await handleLoginRoutes(req, res, JWT_SECRET)) {
-        return;
-    }
-
-    if (req.url.startsWith("/admin/")) {
-
-        const verifiedUser = verifyToken(
-            req,
-            res,
-            JWT_SECRET
-        );
-
-        if (!verifiedUser) {
-            return;
-        }
-
-        if (verifiedUser.role !== "admin") {
-            res.writeHead(403, {
-                "Content-Type": "application/json; charset=utf-8"
-            });
-
-            res.end(JSON.stringify({
-                success: false,
-                message: "Bu işlem için admin yetkisi gerekiyor."
-            }));
-
+    for (const routeHandler of publicRouteHandlers) {
+        if (await routeHandler(req, res)) {
             return;
         }
     }
 
-    if (req.url.startsWith("/metrics/")) {
+    for (const accessRule of accessRules) {
 
-        const verifiedUser = verifyToken(
-            req,
-            res,
-            JWT_SECRET
-        );
+        if (!req.url.startsWith(accessRule.prefix)) {
+            continue;
+        }
 
-        if (!verifiedUser) {
+        const isAuthorized = accessRule.authorize(req, res);
+
+        if (!isAuthorized) {
             return;
         }
+
+        break;
     }
 
-    if (await handleUserRoutes(req, res)) {
-        return;
-    }
-
-    if (await handleAlarmRoutes(req, res)) {
-        return;
-    }
-
-    if (await handleMetricRoutes(req, res)) {
-        return;
+    for (const routeHandler of protectedRouteHandlers) {
+        if (await routeHandler(req, res)) {
+            return;
+        }
     }
 
     res.writeHead(200, {
