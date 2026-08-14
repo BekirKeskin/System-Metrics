@@ -169,6 +169,7 @@ Agent başlatılır:
 ```bash
 node index.js
 ```
+
 Agent çalıştığında Linux sunucunun sistem bilgilerini ve metriklerini Socket.IO üzerinden merkezi backend'e göndermeye başlar.
 
 ---
