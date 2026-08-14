@@ -4,12 +4,8 @@ require("dotenv").config();
 const http = require("node:http");
 const { Server } = require("socket.io");
 
-const handleAlarmRoutes = require("./routes/alarm-routes");
-const handleUserRoutes = require("./routes/user-routes");
-const handleAuthRoutes = require("./routes/auth-routes");
-const handleMetricRoutes = require("./routes/metric-routes");
+const handleHttpRoute = require("./routes/http-router");
 
-const verifyToken = require("./middleware/auth-middleware");
 const agentAuthMiddleware = require("./middleware/agent-auth-middleware");
 
 const handleAgentConnection = require("./socket/agent-handler");
@@ -18,57 +14,10 @@ const handleDashboardConnection = require("./socket/dashboard-handler");
 const createWindowsMonitor = require("./services/windows-monitor-service");
 const createServerListService = require("./services/server-list-service");
 
-const publicRouteHandlers = [
-    (req, res) => handleAuthRoutes(req, res, JWT_SECRET)
-];
-
-const protectedRouteHandlers = [
-    handleUserRoutes,
-    handleAlarmRoutes,
-    handleMetricRoutes
-];
-
 /*          !!!   DEĞİŞKENLER   !!!         */
 
 const JWT_SECRET = process.env.JWT_SECRET;
 let isShuttingDown = false;
-
-const accessRules = [
-    {
-        prefix: "/admin/",
-        authorize: (req, res) => {
-
-            const verifiedUser = verifyToken(req, res, JWT_SECRET);
-
-            if (!verifiedUser) {
-                return false;
-            }
-
-            if (verifiedUser.role !== "admin") {
-
-                res.writeHead(403, {
-                    "Content-Type": "application/json; charset=utf-8"
-                });
-
-                res.end(JSON.stringify({
-                    success: false,
-                    message: "Bu işlem için admin yetkisi gerekiyor."
-                }));
-                return false;
-            }
-            return true;
-        }
-    },
-
-    {
-        prefix: "/metrics/",
-        authorize: (req, res) => {
-            const verifiedUser = verifyToken(req, res, JWT_SECRET);
-
-            return Boolean(verifiedUser);
-        }
-    }
-];
 
 /*          !!!   SERVER   !!!         */
 
@@ -87,38 +36,18 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    for (const routeHandler of publicRouteHandlers) {
-        if (await routeHandler(req, res)) {
-            return;
-        }
+    if (await handleHttpRoute(req, res, JWT_SECRET)) {
+        return;
     }
 
-    for (const accessRule of accessRules) {
-
-        if (!req.url.startsWith(accessRule.prefix)) {
-            continue;
-        }
-
-        const isAuthorized = accessRule.authorize(req, res);
-
-        if (!isAuthorized) {
-            return;
-        }
-
-        break;
-    }
-
-    for (const routeHandler of protectedRouteHandlers) {
-        if (await routeHandler(req, res)) {
-            return;
-        }
-    }
-
-    res.writeHead(200, {
-        "Content-Type": "text/plain; charset=utf-8"
+    res.writeHead(404, {
+        "Content-Type": "application/json; charset=utf-8"
     });
 
-    res.end("Server Çalışıyor!");
+    res.end(JSON.stringify({
+        success: false,
+        message: "Endpoint bulunamadı."
+    }));
 });
 
 const io = new Server(server, {
@@ -146,9 +75,7 @@ io.on("connection", async (socket) => {
         return;
     }
 
-    const clientType =
-        socket.handshake.auth?.clientType ?? "dashboard";
-
+    const clientType = socket.handshake.auth?.clientType ?? "dashboard";
 
     if (clientType === "agent") {
 
@@ -161,11 +88,7 @@ io.on("connection", async (socket) => {
         return;
     }
 
-    await handleDashboardConnection(
-        io,
-        socket,
-        windowsMonitor
-    );
+    await handleDashboardConnection(io, socket, windowsMonitor);
 });
 
 /*          !!!   WINDOWS MONITORING   !!!         */
@@ -188,9 +111,7 @@ process.on("SIGINT", () => {
 
     isShuttingDown = true;
 
-    console.log(
-        "\nKapatma işlemi başlatıldı... "
-    );
+    console.log("\nKapatma işlemi başlatıldı... ");
 
     windowsMonitor.stop();
     serverListService.stopBroadcasting();

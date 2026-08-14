@@ -72,27 +72,14 @@ async function handleCpuHistory(req, res, requestUrl) {
     }
 }
 
-const routes = {
+const metricRoutes = [
+    {
+        method: "GET",
+        path: "/metrics/cpu-history",
+        access: "authenticated",
 
-    GET: {
-        "/metrics/cpu-history": handleCpuHistory
+        handler: (req, res, context) => handleCpuHistory(req, res, context.requestUrl)
     }
+];
 
-};
-
-async function handleMetricRoutes(req, res) {
-
-    const requestUrl = new URL(req.url, "http://localhost");
-    const pathname = requestUrl.pathname;
-    const handler = routes[req.method]?.[pathname];
-
-    if (!handler) {
-        return false;
-    }
-
-    await handler(req, res, requestUrl);
-
-    return true;
-}
-
-module.exports = handleMetricRoutes;
+module.exports = metricRoutes;

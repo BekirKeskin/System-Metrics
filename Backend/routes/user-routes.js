@@ -1,31 +1,22 @@
 const handleCreateUser = require("../handlers/user/create-user-handler");
 const handleGetUsers = require("../handlers/user/get-users-handler");
 
-const routes = {
+const userRoutes = [
+    {
+        method: "GET",
+        path: "/admin/users",
+        access: "admin",
 
-    GET: {
-        "/admin/users": handleGetUsers
+        handler: (req, res, context) => handleGetUsers(req, res, context.requestUrl)
     },
 
-    POST: {
-        "/admin/users": handleCreateUser
+    {
+        method: "POST",
+        path: "/admin/users",
+        access: "admin",
+
+        handler: (req, res, context) => handleCreateUser(req, res, context.requestUrl)
     }
+];
 
-};
-
-async function handleUserRoutes(req, res) {
-
-    const requestUrl = new URL(req.url, "http://localhost");
-    const pathname = requestUrl.pathname;
-    const handler = routes[req.method]?.[pathname];
-
-    if (!handler) {
-        return false;
-    }
-
-    await handler(req, res, requestUrl);
-
-    return true;
-}
-
-module.exports = handleUserRoutes;
+module.exports = userRoutes;

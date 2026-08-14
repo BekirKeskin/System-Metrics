@@ -3,96 +3,46 @@ const handleGetAlarms = require("../handlers/alarm/get-alarms-handler");
 const handleUpdateAlarm = require("../handlers/alarm/update-alarm-handler");
 const handleDeleteAlarm = require("../handlers/alarm/delete-alarm-handler");
 
-const routes = {
+const alarmRoutes = [
+    {
+        method: "GET",
+        path: "/admin/alarms",
+        access: "admin",
 
-    GET: {
-        "/admin/alarms": handleGetAlarms
+        handler: (req, res, context) => handleGetAlarms(req, res, context.requestUrl)
     },
 
-    POST: {
-        "/admin/alarms": handleCreateAlarm
+    {
+        method: "POST",
+        path: "/admin/alarms",
+        access: "admin",
+
+        handler: (req, res, context) => handleCreateAlarm(req, res, context.requestUrl)
+    },
+
+    {
+        method: "PUT",
+        path: /^\/admin\/alarms\/(\d+)$/,
+        access: "admin",
+
+        getParams: (match) => ({
+            id: match[1]
+        }),
+
+        handler: (req, res, context) => handleUpdateAlarm(req, res, context.params, context.requestUrl)
+    },
+
+    {
+        method: "DELETE",
+        path: /^\/admin\/alarms\/(\d+)$/,
+        access: "admin",
+
+        getParams: (match) => ({
+            id: match[1]
+        }),
+
+        handler: (req, res, context) => handleDeleteAlarm(req, res, context.params, context.requestUrl)
     }
+];
 
-};
-
-const dynamicRoutes = {
-
-    PUT: [
-        {
-            pattern: /^\/admin\/alarms\/(\d+)$/,
-
-            handler: handleUpdateAlarm
-        }
-    ],
-
-    DELETE: [
-        {
-            pattern: /^\/admin\/alarms\/(\d+)$/,
-
-            handler: handleDeleteAlarm
-        }
-    ]
-
-};
-
-
-function findDynamicRoute(method, pathname) {
-
-    const methodRoutes = dynamicRoutes[method];
-
-    if (!methodRoutes) {
-        return null;
-    }
-
-    for (const route of methodRoutes) {
-
-        const match = pathname.match(route.pattern);
-
-        if (!match) {
-            continue;
-        }
-
-        return {
-            handler: route.handler,
-
-            params: {
-                id: match[1]
-            }
-        };
-    }
-
-    return null;
-}
-
-
-async function handleAlarmRoutes(req, res) {
-
-    const requestUrl = new URL(req.url, "http://localhost");
-    const pathname = requestUrl.pathname;
-    const staticHandler = routes[req.method]?.[pathname];
-
-    if (staticHandler) {
-
-        await staticHandler(req, res, requestUrl);
-
-        return true;
-    }
-
-    const dynamicRoute = findDynamicRoute(req.method, pathname);
-
-    if (dynamicRoute) {
-
-        await dynamicRoute.handler(
-            req,
-            res,
-            dynamicRoute.params,
-            requestUrl
-        );
-
-        return true;
-    }
-
-    return false;
-}
-
-module.exports = handleAlarmRoutes;
+module.exports = alarmRoutes;

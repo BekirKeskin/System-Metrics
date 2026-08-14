@@ -2,28 +2,30 @@ const handleLogin = require("../handlers/auth/login-handler");
 const handleRefresh = require("../handlers/auth/refresh-handler");
 const handleLogout = require("../handlers/auth/logout-handler");
 
-const routes = {
+const authRoutes = [
+    {
+        method: "POST",
+        path: "/login",
+        access: "public",
 
-    POST: {
-        "/login":handleLogin,
-        "/refresh":handleRefresh,
-        "/logout": handleLogout
+        handler: (req, res, context) => handleLogin(req, res, context.jwtSecret)
+    },
+
+    {
+        method: "POST",
+        path: "/refresh",
+        access: "public",
+
+        handler: (req, res, context) => handleRefresh(req, res, context.jwtSecret)
+    },
+
+    {
+        method: "POST",
+        path: "/logout",
+        access: "public",
+
+        handler: (req, res, context) => handleLogout(req, res, context.jwtSecret)
     }
+];
 
-};
-
-async function handleAuthRoutes(req, res, jwtSecret) {
-    const requestUrl = new URL(req.url, "http://localhost");
-    const pathname = requestUrl.pathname;
-    const handler = routes[req.method]?.[pathname];
-
-    if (!handler) {
-        return false;
-    }
-
-    await handler(req, res, jwtSecret);
-
-    return true;
-}
-
-module.exports = handleAuthRoutes;
+module.exports = authRoutes;
